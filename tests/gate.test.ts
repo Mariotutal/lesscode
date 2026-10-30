@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { evaluateGate } from "../src/gate/gate.js";
+import { evaluateGate, coveringTests, repoCommands } from "../src/gate/gate.js";
 import { measureSource } from "../src/gate/metrics.js";
 import { buildSymbolGraph } from "../src/gate/symbolGraph.js";
 
@@ -63,6 +63,47 @@ describe("symbol graph", () => {
     ]));
     expect(graph.get("src/a.ts")!.referencedByOthers.has("helper")).toBe(true);
   });
+});
+
+describe("LES-19 repo-aware gate", () => {
+  it("discovers repo commands; no tsconfig/typecheck is skipped, not failed", () => {
+    expect(repoCommands(root)).toMatchObject({ test: "vitest run tests", typecheck: "npm run typecheck", lint: "npm run lint" });
+  });
+  it("coveringTests walks imports transitively on the pre-edit tree", () => {
+    const tree = new Map([
+      ["src/demo.js", "export const x = 1;\n"],
+      ["src/persist.ts", "export const p = 1;\n"],
+      ["tests/devtools.test.tsx", 'import { p } from "../src/persist.js";\n'],
+    ]);
+    expect(coveringTests(tree, "src/persist.ts")).toEqual(["tests/devtools.test.tsx"]);
+    expect(coveringTests(tree, "src/demo.js")).toEqual([]);
+  });
+  it("rejects an edit no related test covers, even when tests pass and size drops (zustand case)", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "lc-g19-"));
+    const repo = join(tmp, "f");
+    await sh(root, "bash", ["fixtures/scripts/materialize.sh", "1", repo]);
+    await sh(repo, "npm", ["install", "--no-audit", "--no-fund", "--silent"]);
+    await sh(repo, "git", ["checkout", "-q", "bloated-pr"]);
+    // src/index.ts re-exports userFetcher but no test imports index.ts,
+    // so shrinking it is exactly the uncovered-edit case.
+    writeFileSync(join(repo, "src/index.ts"), 'export * from "./client.js";\n');
+    const result = await evaluateGate({ repoDir: repo, baseRef: "bloated-pr", editSet: ["src/index.ts"], relatedTests: ["tests"] });
+    const cov = result.checks.find((c) => c.name === "edit-covered-by-related-tests");
+    expect(cov!.passed).toBe(false);
+    expect(cov!.detail).toContain("src/index.ts");
+    expect(result.accepted).toBe(false);
+  }, 180_000);
+  it("rejects when the repository has no test command", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "lc-g19b-"));
+    const repo = join(tmp, "f");
+    await sh(root, "bash", ["fixtures/scripts/materialize.sh", "1", repo]);
+    await sh(repo, "git", ["checkout", "-q", "bloated-pr"]);
+    const pkg = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")); delete pkg.scripts.test; writeFileSync(join(repo, "package.json"), JSON.stringify(pkg));
+    await sh(repo, "git", ["apply", join(root, "patches/fixture-1-good.patch")]);
+    const result = await evaluateGate({ repoDir: repo, baseRef: "bloated-pr", editSet: ["src/userFetcher.ts"], relatedTests: ["tests"] });
+    expect(result.accepted).toBe(false);
+    expect(result.checks.find((c) => c.name === "related-tests-pass")!.detail).toMatch(/no test command/);
+  }, 180_000);
 });
 
 describe("gate proofs", () => {

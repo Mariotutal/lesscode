@@ -1,7 +1,7 @@
 import { createGuestClient, type GuestClient, type ToolDefinition } from "../classify/client.js";
 import type { Finding } from "../classify/schema.js";
 import type { ScopeCreepFinding } from "../classify/scopeCreep.js";
-import { readCheckoutSources } from "../classify/checkout.js";
+import { assertFitsWindow, readCheckoutSources } from "../classify/checkout.js";
 import { isSealedPath } from "../classify/evidence.js";
 import { planOutputSchema, wonderOutputSchema, type PlannedEdit, type ReviewNoteItem } from "./schema.js";
 
@@ -107,10 +107,12 @@ const ACTION_FOR: Record<string, PlannedEdit["action"]> = {
 export async function planOnce(opts: {
   checkoutDir: string;
   findings: readonly AnyFinding[];
+  /** Scoped files the planner may see (default: whole checkout — legacy callers). */
+  files?: string[];
   client?: GuestClient;
 }): Promise<PlanResult> {
   const client = opts.client ?? createGuestClient({ env: { ...process.env, META_MODEL: WONDER_MODEL } });
-  const sources = readCheckoutSources(opts.checkoutDir);
+  const sources = readCheckoutSources(opts.checkoutDir, opts.files);
   const numbered = sources.map((s) => `=== ${s.file} ===\n${s.lines.map((l, i) => `${i + 1}\t${l}`).join("\n")}`).join("\n\n");
   const findingsText = opts.findings.map((f, i) =>
     `[${i}] ${f.category} file=${f.file}` +
@@ -119,6 +121,7 @@ export async function planOnce(opts: {
     ` citations=${f.citations.map((c) => `${c.file}:${c.startLine}-${c.endLine}`).join(",")} rationale=${f.rationale}`,
   ).join("\n");
 
+  assertFitsWindow("planner", client.config.model, numbered.length + findingsText.length + 2000);
   const result = await client.chat({
     messages: [
       {

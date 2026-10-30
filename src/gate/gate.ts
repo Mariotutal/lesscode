@@ -19,6 +19,62 @@ export interface GateResult {
   checks: GateCheck[];
   metrics: GateMetrics;
   exitCodes: { tests: number | null; tsc: number | null; eslint: number | null };
+  /** Repo-derived commands actually run (tests/typecheck/lint), for audit. */
+  commands?: { tests?: string; typecheck?: string; lint?: string };
+}
+
+/**
+ * Discover the commands this repository actually uses, from
+ * package.json. `test`: the repo's own script (never a hardcoded
+ * runner). `typecheck`: its script, else tsc only when a tsconfig
+ * exists (tsc without one prints help and exits 1 — not a failure).
+ * `lint`: its script, normalized to an `npm run` invocation.
+ */
+export function repoCommands(repo: string): { test?: string; typecheck?: string; lint?: string } {
+  try {
+    const pkg = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as { scripts?: Record<string, string> };
+    const s = pkg.scripts ?? {};
+    const typecheckScript = s.typecheck ? "npm run typecheck" : s.tsc ? "npm run tsc" : undefined;
+    return {
+      test: s.test,
+      typecheck: typecheckScript ?? (existsSync(join(repo, "tsconfig.json")) ? "npx tsc --noEmit" : undefined),
+      lint: s.lint ? "npm run lint" : undefined,
+    };
+  } catch { return {}; }
+}
+
+export function isTestFilePath(f: string): boolean {
+  return /(^|\/)tests?\//.test(f) || /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(f) || f.includes("__tests__/");
+}
+
+/**
+ * Test files in `tree` whose imports reach `file` (transitively).
+ * Callers pass the PRE-edit tree: after an inline, the surviving test
+ * no longer imports the deleted wrapper, so the after tree would
+ * make every legitimate inline look uncovered.
+ */
+export function coveringTests(tree: Map<string, string>, file: string): string[] {
+  const allFiles = [...tree.keys()];
+  const resolve = (from: string, spec: string): string | undefined => {
+    const parts: string[] = [];
+    for (const seg of `${from.split("/").slice(0, -1).join("/")}/${spec}`.split("/")) {
+      if (seg === "..") parts.pop(); else if (seg !== "." && seg !== "") parts.push(seg);
+    }
+    const stem = parts.join("/").replace(/\.[cm]?[jt]sx?$/, "");
+    for (const cand of [parts.join("/"), ...[".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"].flatMap((e) => [`${stem}${e}`, `${stem}/index${e}`])]) if (allFiles.includes(cand)) return cand;
+    return undefined;
+  };
+  const importsOf = new Map<string, string[]>();
+  for (const f of allFiles) {
+    const text = tree.get(f)!;
+    importsOf.set(f, [...text.matchAll(/(?:from|import)\s*\(?\s*["']([^"']+)["']/g)].map((m) => m[1]!).filter((s) => s.startsWith(".")).map((s) => resolve(f, s)).filter((x): x is string => Boolean(x)));
+  }
+  const reaches = (start: string): boolean => {
+    const seen = new Set<string>(); const stack = [start];
+    while (stack.length) { const cur = stack.pop()!; if (cur === file) return true; if (seen.has(cur)) continue; seen.add(cur); stack.push(...(importsOf.get(cur) ?? [])); }
+    return false;
+  };
+  return allFiles.filter((f) => isTestFilePath(f) && reaches(f));
 }
 
 export interface GateOptions {
@@ -28,6 +84,8 @@ export interface GateOptions {
   editSet: string[];
   /** explicit related test files/dirs to run, relative to repoDir */
   relatedTests: string[];
+  /** Files exempt from the coverage check (code-mandated restore-from-base reverts to the PR base, not model edits). */
+  coverageExempt?: string[];
   runCommands?: boolean; // default true
 }
 
@@ -147,19 +205,53 @@ export async function evaluateGate(opts: GateOptions): Promise<GateResult> {
   const td = testDeletionCheck(diff);
   checks.push({ name: "tests-not-deleted", passed: td.passed && deletedTestFiles.length === 0, detail: deletedTestFiles.length ? `deleted test files: ${deletedTestFiles.join(", ")}` : td.detail });
 
-  // --- commands: exit codes are the source of truth ---
+  // --- coverage: every edited non-test file must be imported (transitively)
+  // by at least one named related test. A passing unrelated test + a size
+  // drop must never accept an edit (zustand demo case). ---
+  const commands = repoCommands(repo);
+  const uncovered = opts.editSet.filter((f) => isSourceFile(f) && !isTestFilePath(f) && !(opts.coverageExempt ?? []).includes(f) && !coveringTests(beforeTree, f).some((t) => opts.relatedTests.some((r) => t === r || t.startsWith(r.endsWith("/") ? r : `${r}/`))));
+  checks.push({ name: "edit-covered-by-related-tests", passed: uncovered.length === 0, detail: uncovered.length ? `no related test imports: ${uncovered.join(", ")}` : "every edited file is imported by a related test" });
+
+  // --- commands: the repository's own, or reject. Exit codes are truth. ---
+  const commandsRun: GateResult["commands"] = {};
   if (opts.runCommands !== false) {
-    exitCodes.tests = await run("npx", ["vitest", "run", ...opts.relatedTests], repo);
-    checks.push({ name: "related-tests-pass", passed: exitCodes.tests === 0, detail: `vitest exit ${exitCodes.tests}` });
-    exitCodes.tsc = await run("npx", ["tsc", "--noEmit"], repo);
-    checks.push({ name: "tsc-passes", passed: exitCodes.tsc === 0, detail: `tsc --noEmit exit ${exitCodes.tsc}` });
-    if (touchedTs.length) {
-      exitCodes.eslint = await run("npx", ["eslint", ...touchedTs], repo);
-      checks.push({ name: "eslint-touched-passes", passed: exitCodes.eslint === 0, detail: `eslint exit ${exitCodes.eslint} on ${touchedTs.join(", ")}` });
+    const shell = async (cmdline: string): Promise<number> => {
+      try { await exec("bash", ["-c", cmdline], { cwd: repo, maxBuffer: 64 * 1024 * 1024 }); return 0; }
+      catch (e) { const err = e as { code?: unknown }; return typeof err.code === "number" ? err.code : 1; }
+    };
+    if (!commands.test) {
+      checks.push({ name: "related-tests-pass", passed: false, detail: "repository has no test command (package.json scripts.test); cannot verify the edit" });
+    } else if (/\bvitest\b/.test(commands.test)) {
+      commandsRun.tests = `npx vitest run ${opts.relatedTests.join(" ")}`;
+      exitCodes.tests = await run("npx", ["vitest", "run", ...opts.relatedTests], repo);
+      checks.push({ name: "related-tests-pass", passed: exitCodes.tests === 0, detail: `${commandsRun.tests} exit ${exitCodes.tests}` });
     } else {
-      checks.push({ name: "eslint-touched-passes", passed: true, detail: "no touched .ts files" });
+      // node:test / tap / mocha / jest / custom: run the repo script with
+      // the related test paths appended (runners accept file args).
+      commandsRun.tests = `${commands.test} ${opts.relatedTests.join(" ")}`.trim();
+      exitCodes.tests = await shell(commandsRun.tests);
+      checks.push({ name: "related-tests-pass", passed: exitCodes.tests === 0, detail: `${commandsRun.tests} exit ${exitCodes.tests}` });
+    }
+    if (commands.typecheck) {
+      commandsRun.typecheck = commands.typecheck;
+      exitCodes.tsc = await shell(commands.typecheck);
+      checks.push({ name: "tsc-passes", passed: exitCodes.tsc === 0, detail: `${commandsRun.typecheck} exit ${exitCodes.tsc}` });
+    } else {
+      checks.push({ name: "tsc-passes", passed: true, detail: "no typecheck command and no tsconfig; skipped" });
+    }
+    const hasEslintConfig = ["eslint.config.mjs", "eslint.config.js", "eslint.config.cjs", ".eslintrc.json", ".eslintrc.js", ".eslintrc.cjs"].some((f) => existsSync(join(repo, f)));
+    if (touchedTs.length && (commands.lint || hasEslintConfig)) {
+      commandsRun.lint = commands.lint ?? `npx eslint ${touchedTs.join(" ")}`;
+      exitCodes.eslint = commands.lint
+        ? await shell(`${commands.lint} -- ${touchedTs.join(" ")}`)
+        : await run("npx", ["eslint", ...touchedTs], repo);
+      checks.push({ name: "eslint-touched-passes", passed: exitCodes.eslint === 0, detail: `${commandsRun.lint} exit ${exitCodes.eslint} on ${touchedTs.join(", ")}` });
+    } else if (touchedTs.length) {
+      checks.push({ name: "eslint-touched-passes", passed: true, detail: "repository has no eslint config/command; skipped" });
+    } else {
+      checks.push({ name: "eslint-touched-passes", passed: true, detail: "no touched source files" });
     }
   }
 
-  return { accepted: checks.every((c) => c.passed), checks, metrics: { sizeBefore, sizeAfter, cyclomaticBefore: cycBefore, cyclomaticAfter: cycAfter, changedFunctions }, exitCodes };
+  return { accepted: checks.every((c) => c.passed), checks, metrics: { sizeBefore, sizeAfter, cyclomaticBefore: cycBefore, cyclomaticAfter: cycAfter, changedFunctions }, exitCodes, commands: commandsRun };
 }
