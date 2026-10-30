@@ -67,6 +67,13 @@ export function buildSymbolGraph(files: Map<string, string>): Map<string, FileSy
     target: ts.ScriptTarget.Latest,
     module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
+    // One program reads both languages (spec): allowJs puts .js files
+    // in the program so an import resolving to a .js file is credited.
+    // checkJs stays OFF here — the graph must not fail a .js file for
+    // missing types; the gate's tsc step uses the repository's own
+    // tsconfig and therefore its own checkJs setting.
+    allowJs: true,
+    checkJs: false,
     noLib: true,
     noEmit: true,
     skipLibCheck: true,

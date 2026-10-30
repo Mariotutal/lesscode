@@ -8,6 +8,7 @@
     "classify": "tsx src/classify/cli.ts",
     "plan": "tsx src/plan/cli.ts",
     "simplify": "tsx src/simplify/cli.ts",
+    "review": "tsx src/review/cli.ts",
     "simplify-tool": "tsx src/tool/cli.ts",
     "test": "vitest run tests",
     "typecheck": "tsc --noEmit",

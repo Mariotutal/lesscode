@@ -3,7 +3,7 @@ import type { Finding } from "../classify/schema.js";
 import type { ScopeCreepFinding } from "../classify/scopeCreep.js";
 import { readCheckoutSources } from "../classify/checkout.js";
 import { isSealedPath } from "../classify/evidence.js";
-import { planOutputSchema, type PlannedEdit } from "./schema.js";
+import { planOutputSchema, wonderOutputSchema, type PlannedEdit, type ReviewNoteItem } from "./schema.js";
 
 export const WONDER_MODEL = "muse-wonder-1.0";
 export const PLAN_TOOL = "propose_surgical_patch";
@@ -22,6 +22,21 @@ const PLAN_TOOL_DEF: ToolDefinition = {
       additionalProperties: false,
       required: ["edits"],
       properties: {
+        review: {
+          type: "array",
+          description: "Senior note items (never applied). Each cites existing lines.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["kind", "text", "citations"],
+            properties: {
+              kind: { type: "string", enum: ["boundary", "name-mismatch", "test-gap", "load-bearing", "question", "practice"] },
+              text: { type: "string" },
+              citations: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false, required: ["file", "startLine", "endLine"], properties: { file: { type: "string" }, startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 } } } },
+              ordersEditForFinding: { type: "integer", minimum: 0 },
+            },
+          },
+        },
         edits: {
           type: "array",
           items: {
@@ -54,6 +69,8 @@ export type AnyFinding = Finding | ScopeCreepFinding;
 
 export interface PlanResult {
   edits: PlannedEdit[];
+  /** Senior note items returned in the SAME single Wonder call (unfiltered; code filters). */
+  review: ReviewNoteItem[];
   skipped: { findingIndex: number; reason: string }[];
   model: string;
   modelCalls: number;
@@ -113,6 +130,7 @@ export async function planOnce(opts: {
           "scope-creep: action restore-from-base with empty newFiles/deleteFiles — code restores it.",
           "convention-break: action convention-fix with empty newFiles — code applies the mechanical fix.",
           "Refuse (skip) any finding whose code is load-bearing (transforms/unwraps/normalises) or not truly single-use/duplicate. When in doubt, skip.",
+          "ALSO return `review`: the senior note, in the SAME response. The note covers only what a lead would say and a checker cannot prove: a boundary that hides the wrong concept (kind boundary), a name that disagrees with the concept already in the repository (name-mismatch), a test that does not lock the behaviour the change claims (test-gap), a load-bearing symbol that must stay (load-bearing), a practice this repository has not written in its convention registry (practice), or a question for the author (question). Each item cites a line that exists. Set ordersEditForFinding only when the item orders an edit for a finding index. The note is never applied.",
           "For inline/retarget, newFiles must contain the FULL new content of every rewritten file, preserving all other behaviour byte-for-byte in spirit. Never edit tests. Never touch sealed paths (none are shown).",
         ].join("\n"),
       },
@@ -123,19 +141,25 @@ export async function planOnce(opts: {
   });
 
   const raw = extractJson(result);
-  const parsed = planOutputSchema.safeParse(raw);
+  // Accept the combined Wonder output; fall back to an edits-only plan
+  // (note then empty) so older scripted/live responses still validate.
+  const wonderParsed = wonderOutputSchema.safeParse(raw);
+  const parsedData = wonderParsed.success
+    ? wonderParsed.data
+    : (() => { const p = planOutputSchema.safeParse(raw); return p.success ? { edits: p.data.edits, review: [] as ReviewNoteItem[] } : null; })();
   const skipped: PlanResult["skipped"] = [];
-  if (!parsed.success) {
+  if (!parsedData) {
     // One plan only. An invalid plan becomes no edits, never a second call.
-    return { edits: [], skipped: opts.findings.map((_, i) => ({ findingIndex: i, reason: "plan failed schema validation" })), model: client.config.model, modelCalls: 1, usage: result.usage, rawOutput: raw };
+    return { edits: [], review: [], skipped: opts.findings.map((_, i) => ({ findingIndex: i, reason: "plan failed schema validation" })), model: client.config.model, modelCalls: 1, usage: result.usage, rawOutput: raw };
   }
+  const parsed = { data: parsedData };
 
   // Surgical scope for inline/retarget: the finding's file, its cited
   // files, the existing helper (retarget), and every file that imports
   // the finding's file — those importers are its call sites, which the
   // classifier may not cite even though the edit must rewrite them.
   const importersOf = (target: string): string[] => {
-    const stem = target.replace(/\.ts$/, "");
+    const stem = target.replace(/\.[cm]?[jt]sx?$/, "");
     return sources.filter((s) => {
       if (s.file === target) return false;
       return [...s.text.matchAll(/from\s+["']([^"']+)["']/g)].some((m) => {
@@ -145,7 +169,7 @@ export async function planOnce(opts: {
         for (const seg of `${s.file.split("/").slice(0, -1).join("/")}/${spec}`.split("/")) {
           if (seg === "..") parts.pop(); else if (seg !== "." && seg !== "") parts.push(seg);
         }
-        return parts.join("/").replace(/\.(js|ts)$/, "") === stem;
+        return parts.join("/").replace(/\.[cm]?[jt]sx?$/, "") === stem;
       });
     }).map((s) => s.file);
   };
@@ -179,5 +203,5 @@ export async function planOnce(opts: {
     edits.push(edit);
   }
   opts.findings.forEach((_, i) => { if (!seen.has(i)) skipped.push({ findingIndex: i, reason: "planner made no decision for this finding" }); });
-  return { edits, skipped, model: client.config.model, modelCalls: 1, usage: result.usage, rawOutput: raw };
+  return { edits, review: parsed.data.review, skipped, model: client.config.model, modelCalls: 1, usage: result.usage, rawOutput: raw };
 }
