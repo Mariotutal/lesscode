@@ -204,6 +204,46 @@ patch (verdict `reviewed`); fixture 8 — `no-console-log` written in
 the registry removed is only a `practice` note item. A note item
 ordering fixture 5's complexity edit is replaced by the gate reason.
 
+## Pull-request review caller (LES-7)
+
+`src/pr/` is the pull-request caller of `review(checkout, base,
+intent)` — no second pipeline, and `src/review`, `src/simplify`,
+`src/plan`, `src/classify`, and `src/gate` are untouched. A pull
+request declares its base ref and intent in `lesscode-pr.json` at the
+checkout root (`{ "baseRef": "base", "intent": ["src/a.ts"] }`,
+optional `relatedTests`). `runPrReview({ checkout })` resolves
+checkout/base/intent from that declaration, calls `review()` once,
+and splits the result into the two posts:
+
+- the GATE as a check — `check.body` is exactly
+  `JSON.stringify(result.gate)` and the conclusion derives from the
+  gate alone (`success` iff the gate ran and accepted, else
+  `failure`, including `gate: null` when no edit reached the gate),
+  so a failing gate can be a required check;
+- the SENIOR NOTE as a comment — `comment.body` is exactly
+  `result.review.markdown`. The note carries no conclusion and
+  cannot satisfy branch protection; a reviewed-only run (note is the
+  result, nothing applied) still posts a failing check when its gate
+  is null.
+
+`result.applied` is returned for the caller to apply; this caller
+never applies it, never modifies the pull-request branch, and never
+merges.
+
+```bash
+npm run pr-review -- --repo <dir> [--result <file>]   # thin CLI adapter: prints { check, comment }
+npm test   # tests/pr.test.ts drives the caller with a scripted model
+```
+
+Proofs (`tests/pr.test.ts`, scripted Spark+Wonder, no live model,
+no sealed reads): an accepted fixture (fixture 8's registered
+`no-console-log` practice) produces the same `review()` result as
+calling `review` directly, with the check body equal to that gate
+and the comment equal to that note markdown; a reviewed-only fixture
+(fixture 7's cited design note) posts that note as the comment and
+the null gate as a failing check. In both, the PR branch HEAD and
+working tree are unchanged.
+
 ## Simplify as one tool (LES-6)
 
 `src/tool/` exposes that same function as one tool another agent can call:
