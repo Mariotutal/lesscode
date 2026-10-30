@@ -1,6 +1,6 @@
 import type { GuestClient } from "../classify/client.js";
 import { citationExists } from "../classify/evidence.js";
-import { readTsConfig } from "../classify/checkout.js";
+import { changedFilesFromGit, readTsConfig, scopedReviewFiles } from "../classify/checkout.js";
 import type { GateResult } from "../gate/gate.js";
 import type { AnyFinding } from "../plan/plan.js";
 import type { ReviewNoteItem } from "../plan/schema.js";
@@ -85,9 +85,13 @@ export async function review(opts: ReviewOptions): Promise<ReviewResult> {
 
     // Filter the note by code. Citations are checked against the
     // caller checkout (same tree the scratch worktree started from).
+    // The note is about the change: an item citing a file outside the
+    // scoped (visible) set is dropped even when the line exists.
+    const changed = await changedFilesFromGit(opts.checkout, opts.base).catch(() => []);
+    const visible = new Set(scopedReviewFiles(opts.checkout, { intentFiles: opts.intent, changedFiles: changed, relatedTests: opts.relatedTests }));
     const items: ReviewNoteItem[] = [];
     for (const item of result.plan.review) {
-      if (!item.citations.every((c) => citationExists(opts.checkout, c))) continue; // dropped
+      if (!item.citations.every((c) => visible.has(c.file) && citationExists(opts.checkout, c))) continue; // dropped
       const rejected = item.ordersEditForFinding !== undefined ? gateRejections.get(item.ordersEditForFinding) : undefined;
       if (rejected !== undefined) {
         items.push({ ...item, text: `Not applied: ${rejected}`, ordersEditForFinding: undefined });
@@ -98,7 +102,7 @@ export async function review(opts: ReviewOptions): Promise<ReviewResult> {
     // Practices outside the registry: refused as edits, kept as note.
     for (const refused of result.refusedConventions) {
       if (items.some((i) => i.kind === "practice" && i.citations[0]?.file === refused.file)) continue;
-      if (!refused.citations.every((c) => citationExists(opts.checkout, c))) continue;
+      if (!refused.citations.every((c) => visible.has(c.file) && citationExists(opts.checkout, c))) continue;
       items.push({
         kind: "practice",
         text: `Practice "${refused.convention}" is not written in this repository's convention registry, so it is not applied: ${refused.rationale}`,

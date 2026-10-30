@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { classifyFindings } from "../src/classify/classify.js";
+import { scopedReviewFiles } from "../src/classify/checkout.js";
 import type { GuestClient } from "../src/classify/client.js";
 import { filterByEvidence, citationExists, isSealedPath } from "../src/classify/evidence.js";
 import { decideScopeCreep } from "../src/classify/scopeCreep.js";
@@ -200,6 +201,42 @@ describe("classifier tool loop (stubbed wire)", () => {
     expect(r.findings[0]!.category).toBe("convention-break");
     expect(r.refusedConventions).toHaveLength(1);
     expect(r.refusedConventions[0]!.status).toBe("refused");
+  });
+});
+
+describe("LES-19 scoped review files", () => {
+  it("sees the change + one-hop neighbours + related tests, not the whole checkout", () => {
+    const dir = checkout({
+      ...SRC,
+      "src/other.ts": "export const o = 1;\n",
+      "src/deep.ts": 'import { o } from "./other.js";\nexport const d = o;\n',
+      "tests/use.test.ts": 'import { out } from "../src/use.js";\n',
+      "tsconfig.json": JSON.stringify({ compilerOptions: { allowJs: true } }),
+      "src/legacy.js": "export const l = 1;\n",
+    });
+    const files = scopedReviewFiles(dir, { intentFiles: ["src/use.ts"] });
+    expect(files).toContain("src/use.ts");
+    expect(files).toContain("src/wrap.ts"); // imported by the change
+    expect(files).toContain("tests/use.test.ts"); // test importing the change
+    expect(files).not.toContain("src/deep.ts"); // two hops away
+    expect(files).not.toContain("src/legacy.js"); // unrelated
+  });
+  it("excludes JavaScript neighbours when allowJs is false, includes them when true; the change itself is always visible", () => {
+    const mk = (allowJs: boolean) => checkout({ "src/a.ts": 'import { l } from "./legacy.js";\nexport const a = l;\n', "src/legacy.js": "export const l = 1;\n", "tsconfig.json": JSON.stringify({ compilerOptions: { allowJs } }) });
+    expect(scopedReviewFiles(mk(false), { intentFiles: ["src/a.ts"] })).not.toContain("src/legacy.js");
+    expect(scopedReviewFiles(mk(true), { intentFiles: ["src/a.ts"] })).toContain("src/legacy.js");
+    // A JavaScript change under allowJs:false still sees its own files.
+    const js = checkout({ "src/main.js": "export const m = 1;\n", "src/other.js": "export const o = 1;\n", "tsconfig.json": JSON.stringify({ compilerOptions: { allowJs: false } }) });
+    expect(scopedReviewFiles(js, { intentFiles: ["src/main.js"] })).toEqual(["src/main.js"]);
+  });
+  it("fails before the request when the scoped prompt exceeds the window", async () => {
+    const dir = checkout({ "src/big.ts": `export const x = "${"x".repeat(20000)}";\n` });
+    process.env.LESSCODE_CONTEXT_WINDOW = "100";
+    try {
+      const client = stubClient([{ findings: [] }]);
+      await expect(classifyFindings({ checkoutDir: dir, client })).rejects.toThrow(/~\d+ tokens.*100-token context window/);
+      expect(client.calls).toBe(0);
+    } finally { delete process.env.LESSCODE_CONTEXT_WINDOW; }
   });
 });
 

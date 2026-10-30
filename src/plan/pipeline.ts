@@ -1,5 +1,5 @@
 import { classifyFindings } from "../classify/classify.js";
-import { changedFilesFromGit } from "../classify/checkout.js";
+import { changedFilesFromGit, scopedReviewFiles } from "../classify/checkout.js";
 import type { GuestClient } from "../classify/client.js";
 import { createGuestClient } from "../classify/client.js";
 import { evaluateGate, type GateResult } from "../gate/gate.js";
@@ -35,14 +35,16 @@ export async function runPipeline(opts: {
   // package-lock.json is an install artifact of the harness checkout,
   // never PR scope creep.
   const changed = (await changedFilesFromGit(opts.checkoutDir, opts.baseRef)).filter((f) => f !== "package-lock.json");
+  const visible = scopedReviewFiles(opts.checkoutDir, { intentFiles: opts.intentFiles, changedFiles: changed, relatedTests: opts.relatedTests });
   const classification = await classifyFindings({
     checkoutDir: opts.checkoutDir,
+    files: visible,
     scopeCreep: { changedFiles: changed, intentFiles: opts.intentFiles },
     client: opts.sparkClient,
   });
 
   const wonder = opts.wonderClient ?? createGuestClient({ env: { ...process.env, META_MODEL: WONDER_MODEL } });
-  const plan = await planOnce({ checkoutDir: opts.checkoutDir, findings: classification.findings, client: wonder });
+  const plan = await planOnce({ checkoutDir: opts.checkoutDir, findings: classification.findings, files: visible, client: wonder });
   const apply = await applyPlan({
     checkoutDir: opts.checkoutDir,
     baseRef: opts.baseRef,
