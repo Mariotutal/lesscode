@@ -78,6 +78,43 @@ out-of-intent orders files), fixture 5 keeps nothing. Every kept
 finding cites lines that exist; invented-line findings are dropped
 (unit-tested in `tests/classify.test.ts` with a stubbed wire).
 
-Fixtures 1–4 predate the gate; their `package.json` files now also carry the
-ESLint dev-deps and `fixtures/eslint.config.mjs` is materialized into fixture
-repos so the gate's ESLint step can run there.
+Fixtures 1, 2 and 5 carry the ESLint dev-deps in their `package.json`
+files, and `fixtures/eslint.config.mjs` is materialized into fixture
+repos so the gate's ESLint step can run there. (Fixtures 3–4 lack them:
+fixture 4's run is expected to be refused before the gate, and fixture 3
+is not gate-run.)
+
+## Plan once and apply (LES-4, Wonder + gate)
+
+`src/plan/` runs the full pipeline (`pipeline.ts`, CLI `src/plan/cli.ts`):
+Spark classifies, then `muse-wonder-1.0` plans **exactly once per run**
+(`plan.ts`: one call, no retry — an invalid plan becomes no edits), code
+applies the plan (`apply.ts`), and the deterministic gate decides.
+
+The Planner chooses per finding: `inline` (single-use abstraction),
+`retarget` (duplicate helper → existing helper), `restore-from-base`
+(scope creep; contents come from git, never the model), `convention-fix`
+(mechanical fix applied by code), or `skip` (refuse). Code-side
+validation rejects edits that touch tests/sealed paths, files outside
+the finding's cited set plus its importers, or whose action does not
+match the finding category. It does not reimplement the feature.
+
+Apply runs `tsc` after each edit; on failure it takes **one** Wonder
+repair turn carrying the compiler error, then skips that finding
+(reverting its files) and gates what remains. A shorter diff is not
+success by itself — the gate (tests, tsc, ESLint, exports outside the
+edit set, size drop, cyclomatic cap, no test deletion) decides.
+
+```bash
+META_API_KEY=... npx tsx src/plan/cli.ts --repo <dir> --base base \
+  --gate-base bloated-pr --intent src/a.ts,src/b.ts --tests tests
+bash scripts/run-plan-fixtures.sh   # live run over fixtures 1, 2, 4
+```
+
+Live run (`docs/plan-fixture-results.txt`): fixture 1 — three inlines,
+gate **accepted** (53→33 code lines); fixture 2 — duplicate
+`formatMoney` retargeted to `src/lib/formatMoney.ts`, gate **accepted**
+(32→25); fixture 4 — Wonder refused both findings (load-bearing
+`SharedApiClient`, no proven scope creep), no patch, gate not run.
+Fixture 2's `package.json` files gained the ESLint dev-deps (as in
+fixtures 1/5) so the gate's ESLint step can run in its checkout.
