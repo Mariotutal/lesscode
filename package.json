@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "gate": "tsx src/gate/cli.ts",
+    "classify": "tsx src/classify/cli.ts",
     "test": "vitest run tests",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests"
@@ -19,7 +20,8 @@
     "vitest": "^3.2.0"
   },
   "dependencies": {
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "zod": "^4.6.7"
   },
   "allowScripts": {
     "esbuild@0.28.2": true

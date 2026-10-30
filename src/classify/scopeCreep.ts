@@ -1,0 +1,53 @@
+import type { Citation, Finding } from "./schema.js";
+
+/**
+ * Scope creep is decided by code, not by the model (LES-3).
+ *
+ * Given the files changed vs a base ref and the changed files that
+ * belong to the declared PR intent, every other changed file is scope
+ * creep — restore it from the base. The model is never consulted for
+ * this category and reports no creep itself.
+ *
+ * Line citations point at the first line of the file, which exists by
+ * construction for files present in the checkout (or at line 1 of the
+ * base copy for deleted files, where the finding is still kept by the
+ * evidence filter because the caller cites the base ref — callers that
+ * need strict checkout existence should pass `exists` accordingly).
+ */
+export interface ScopeCreepFinding extends Omit<Finding, "category"> {
+  category: "scope-creep";
+  /** Code-decided action: restore this file from the base ref. */
+  action: "restore-from-base";
+}
+
+export interface ScopeCreepInput {
+  /** Files changed vs the base ref (repo-relative). */
+  changedFiles: readonly string[];
+  /** Files that belong to the PR's declared intent (repo-relative). */
+  intentFiles: readonly string[];
+  /** Evidence lines per changed file (default: line 1). */
+  lineCount?: (file: string) => number;
+}
+
+export function decideScopeCreep(input: ScopeCreepInput): ScopeCreepFinding[] {
+  const intent = new Set(input.intentFiles);
+  const out: ScopeCreepFinding[] = [];
+  for (const file of [...input.changedFiles].sort()) {
+    if (intent.has(file)) continue;
+    const citation: Citation = {
+      file,
+      startLine: 1,
+      endLine: 1,
+    };
+    out.push({
+      category: "scope-creep",
+      file,
+      citations: [citation],
+      action: "restore-from-base",
+      rationale:
+        `Changed vs base but not part of the PR intent (${input.intentFiles.join(", ") || "none declared"}); ` +
+        "restore from base.",
+    });
+  }
+  return out;
+}
