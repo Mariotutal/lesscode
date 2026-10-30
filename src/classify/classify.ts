@@ -1,5 +1,5 @@
 import { createGuestClient, type GuestClient, type ToolDefinition } from "./client.js";
-import { CONVENTIONS } from "./conventions.js";
+import { CONVENTIONS, loadRepositoryConventions } from "./conventions.js";
 import { readCheckoutSources, type CheckoutSource } from "./checkout.js";
 import { citationExists, filterByEvidence, isSealedPath } from "./evidence.js";
 import { decideConventionBreak, type ConventionDecision } from "./conventionBreak.js";
@@ -80,6 +80,8 @@ export interface ClassifyResult {
   findings: (Finding | ScopeCreepFinding)[];
   /** Model findings dropped because cited lines do not exist (or file is sealed/outside). */
   dropped: Finding[];
+  /** Convention names this repository wrote in lesscode-conventions.json. */
+  registry: string[];
   refusedConventions: ConventionDecision[];
   /** Raw model output(s) as parsed JSON (pre-filter), for audit. */
   rawOutputs: unknown[];
@@ -200,9 +202,12 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
   const keptSet = new Set(kept);
   const dropped = all.filter((f) => !keptSet.has(f as Finding));
 
-  // Convention-break: mechanical fix or refuse.
+  // Convention-break: mechanical fix or refuse. A fix is applied only
+  // when the repository wrote the practice down in its registry;
+  // otherwise the finding is refused (the review note may still carry it).
+  const registry = loadRepositoryConventions(opts.checkoutDir);
   const conventionFindings = kept.filter((f) => f.category === "convention-break");
-  const decisions = decideConventionBreak(opts.checkoutDir, conventionFindings);
+  const decisions = decideConventionBreak(opts.checkoutDir, conventionFindings, registry);
   const refusedConventions = decisions.filter((d) => d.status === "refused");
   const refusedSet = new Set(refusedConventions.map((d) => d.finding));
   const finalModel = kept.filter((f) => !refusedSet.has(f));
@@ -224,6 +229,7 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
   return {
     findings: [...finalModel, ...scopeFindings],
     dropped,
+    registry,
     refusedConventions,
     rawOutputs,
     model: client.config.model,

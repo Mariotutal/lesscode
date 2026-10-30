@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { findConvention } from "./conventions.js";
+import { findConvention, loadRepositoryConventions } from "./conventions.js";
 import type { Finding } from "./schema.js";
 
 export type ConventionDecision =
@@ -12,15 +12,26 @@ export type ConventionDecision =
  * keep a finding only when a registered mechanical fix applies to at
  * least one cited line range. Otherwise refuse — never guess an edit.
  */
-export function decideConventionBreak(checkoutDir: string, findings: readonly Finding[]): ConventionDecision[] {
+export function decideConventionBreak(
+  checkoutDir: string,
+  findings: readonly Finding[],
+  registeredInRepo: readonly string[] = loadRepositoryConventions(checkoutDir),
+): ConventionDecision[] {
+  const registered = new Set(registeredInRepo);
   return findings.map((finding) => {
     const name = finding.convention;
     if (!name) {
       return { status: "refused", finding, reason: "convention-break finding names no convention" };
     }
-    const convention = findConvention(name);
+    const convention = findConvention(name, registered);
     if (!convention) {
-      return { status: "refused", finding, reason: `no mechanical fix registered for convention "${name}"` };
+      return {
+        status: "refused",
+        finding,
+        reason: registered.has(name)
+          ? `convention "${name}" is registered in the repository but has no mechanical fix`
+          : `convention "${name}" is not written in this repository's convention registry (lesscode-conventions.json)` ,
+      };
     }
     let text: string;
     try {

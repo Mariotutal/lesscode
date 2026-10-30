@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { buildSymbolGraph } from "./symbolGraph.js";
 import { measureSource } from "./metrics.js";
+import { isSourceFile } from "../classify/checkout.js";
 
 const exec = promisify(execFile);
 
@@ -41,7 +42,7 @@ async function git(repo: string, args: string[]): Promise<string> {
 }
 
 async function treeAt(repo: string, ref: string): Promise<Map<string, string>> {
-  const names = (await git(repo, ["ls-tree", "-r", "--name-only", ref])).split("\n").filter((f) => f.endsWith(".ts") && !f.includes("node_modules/"));
+  const names = (await git(repo, ["ls-tree", "-r", "--name-only", ref])).split("\n").filter((f) => isSourceFile(f) && !f.includes("node_modules/"));
   const out = new Map<string, string>();
   for (const f of names) out.set(f, await git(repo, ["show", `${ref}:${f}`]));
   return out;
@@ -57,7 +58,7 @@ async function worktreeTree(repo: string, baseRef: string, baseFiles: Map<string
     if (f.includes("node_modules/")) continue;
     const abs = join(repo, f);
     if (!existsSync(abs)) out.delete(f);
-    else if (f.endsWith(".ts")) out.set(f, readFileSync(abs, "utf8"));
+    else if (isSourceFile(f)) out.set(f, readFileSync(abs, "utf8"));
   }
   return out;
 }
@@ -89,7 +90,7 @@ export async function evaluateGate(opts: GateOptions): Promise<GateResult> {
   const diff = await git(repo, ["diff", opts.baseRef, "--", "."]);
   const nameStatus = await git(repo, ["diff", "--name-status", opts.baseRef]);
   const changedFiles = nameStatus.split("\n").filter(Boolean).map((l) => l.split("\t").at(-1)!);
-  const touchedTs = changedFiles.filter((f) => f.endsWith(".ts") && existsSync(join(repo, f)));
+  const touchedTs = changedFiles.filter((f) => isSourceFile(f) && existsSync(join(repo, f)));
 
   const beforeTree = await treeAt(repo, opts.baseRef);
   const afterTree = await worktreeTree(repo, opts.baseRef, beforeTree);
