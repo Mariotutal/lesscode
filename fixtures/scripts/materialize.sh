@@ -10,9 +10,11 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 rm -rf "$target"; mkdir -p "$target"; cd "$target"
 git init -q -b base
 cp -R "$root/fixtures/$n/base/." .
+cp "$root/fixtures/eslint.config.mjs" . 2>/dev/null || true
 git add -A; git -c user.email=fixture@local -c user.name=fixture commit -qm "base"
 git checkout -qb bloated-pr
 # bloated snapshot replaces the tree (handles deletions between snapshots)
 git rm -rq . >/dev/null; cp -R "$root/fixtures/$n/bloated/." .
+cp "$root/fixtures/eslint.config.mjs" . 2>/dev/null || true
 git add -A; git -c user.email=fixture@local -c user.name=fixture commit -qm "bloated PR"
 echo "materialized fixture $n at $target (branches: base, bloated-pr)"

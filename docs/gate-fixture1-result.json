@@ -1,0 +1,101 @@
+{
+  "accepted": true,
+  "checks": [
+    {
+      "name": "size-drops",
+      "passed": true,
+      "detail": "code lines 53 -> 30 (comment/blank lines excluded)"
+    },
+    {
+      "name": "cyclomatic-not-over-10pct",
+      "passed": true,
+      "detail": "no changed function rises >10% (sum 8 -> 2)"
+    },
+    {
+      "name": "exports-outside-edit-set-unchanged",
+      "passed": true,
+      "detail": "exports outside edit set identical"
+    },
+    {
+      "name": "tests-not-deleted",
+      "passed": true,
+      "detail": "no test case removed or skipped"
+    },
+    {
+      "name": "related-tests-pass",
+      "passed": true,
+      "detail": "vitest exit 0"
+    },
+    {
+      "name": "tsc-passes",
+      "passed": true,
+      "detail": "tsc --noEmit exit 0"
+    },
+    {
+      "name": "eslint-touched-passes",
+      "passed": true,
+      "detail": "eslint exit 0 on src/userFetcher.ts"
+    }
+  ],
+  "metrics": {
+    "sizeBefore": 53,
+    "sizeAfter": 30,
+    "cyclomaticBefore": 8,
+    "cyclomaticAfter": 2,
+    "changedFunctions": [
+      {
+        "file": "src/userApiClient.ts",
+        "name": "<anonymous>",
+        "before": 1,
+        "after": 0
+      },
+      {
+        "file": "src/userApiClient.ts",
+        "name": "fetchUser",
+        "before": 1,
+        "after": 0
+      },
+      {
+        "file": "src/userFetcher.ts",
+        "name": "<anonymous>",
+        "before": 1,
+        "after": 1
+      },
+      {
+        "file": "src/userFetcher.ts",
+        "name": "getUser",
+        "before": 1,
+        "after": 1
+      },
+      {
+        "file": "src/userRepository.ts",
+        "name": "<anonymous>",
+        "before": 1,
+        "after": 0
+      },
+      {
+        "file": "src/userRepository.ts",
+        "name": "findById",
+        "before": 1,
+        "after": 0
+      },
+      {
+        "file": "src/userService.ts",
+        "name": "<anonymous>",
+        "before": 1,
+        "after": 0
+      },
+      {
+        "file": "src/userService.ts",
+        "name": "loadUser",
+        "before": 1,
+        "after": 0
+      }
+    ]
+  },
+  "exitCodes": {
+    "tests": 0,
+    "tsc": 0,
+    "eslint": 0
+  }
+}

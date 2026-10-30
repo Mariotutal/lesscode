@@ -1,0 +1,27 @@
+{
+  "name": "lesscode",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "gate": "tsx src/gate/cli.ts",
+    "test": "vitest run tests",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@types/node": "^22.20.5",
+    "eslint": "^9.39.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.2.0"
+  },
+  "dependencies": {
+    "typescript": "^5.8.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}

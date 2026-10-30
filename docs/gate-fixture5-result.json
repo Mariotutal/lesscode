@@ -1,0 +1,77 @@
+{
+  "accepted": false,
+  "checks": [
+    {
+      "name": "size-drops",
+      "passed": true,
+      "detail": "code lines 56 -> 51 (comment/blank lines excluded)"
+    },
+    {
+      "name": "cyclomatic-not-over-10pct",
+      "passed": false,
+      "detail": "src/pricing.ts:totalPrice 2 -> 12 exceeds +10%"
+    },
+    {
+      "name": "exports-outside-edit-set-unchanged",
+      "passed": true,
+      "detail": "exports outside edit set identical"
+    },
+    {
+      "name": "tests-not-deleted",
+      "passed": true,
+      "detail": "no test case removed or skipped"
+    },
+    {
+      "name": "related-tests-pass",
+      "passed": true,
+      "detail": "vitest exit 0"
+    },
+    {
+      "name": "tsc-passes",
+      "passed": true,
+      "detail": "tsc --noEmit exit 0"
+    },
+    {
+      "name": "eslint-touched-passes",
+      "passed": true,
+      "detail": "eslint exit 0 on src/pricing.ts"
+    }
+  ],
+  "metrics": {
+    "sizeBefore": 56,
+    "sizeAfter": 51,
+    "cyclomaticBefore": 15,
+    "cyclomaticAfter": 12,
+    "changedFunctions": [
+      {
+        "file": "src/pricing.ts",
+        "name": "discountRate",
+        "before": 6,
+        "after": 0
+      },
+      {
+        "file": "src/pricing.ts",
+        "name": "applyPromotions",
+        "before": 6,
+        "after": 0
+      },
+      {
+        "file": "src/pricing.ts",
+        "name": "lineTotal",
+        "before": 1,
+        "after": 0
+      },
+      {
+        "file": "src/pricing.ts",
+        "name": "totalPrice",
+        "before": 2,
+        "after": 12
+      }
+    ]
+  },
+  "exitCodes": {
+    "tests": 0,
+    "tsc": 0,
+    "eslint": 0
+  }
+}

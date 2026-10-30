@@ -1,0 +1,56 @@
+diff --git a/src/userApiClient.ts b/src/userApiClient.ts
+deleted file mode 100644
+index 62e50f2..0000000
+--- a/src/userApiClient.ts
++++ /dev/null
+@@ -1,6 +0,0 @@
+-import type { HttpClient, User } from "./client.js";
+-/** Single-use: only UserRepository calls this. */
+-export class UserApiClient {
+-  constructor(private readonly client: HttpClient) {}
+-  fetchUser(id: number): Promise<User> { return this.client.get<User>(`/users/${id}`); }
+-}
+diff --git a/src/userFetcher.ts b/src/userFetcher.ts
+index 442847e..2e74437 100644
+--- a/src/userFetcher.ts
++++ b/src/userFetcher.ts
+@@ -1,11 +1,5 @@
+ import type { HttpClient, User } from "./client.js";
+-import { UserApiClient } from "./userApiClient.js";
+-import { UserRepository } from "./userRepository.js";
+-import { UserService } from "./userService.js";
+ export class UserFetcher {
+-  private readonly service: UserService;
+-  constructor(client: HttpClient) {
+-    this.service = new UserService(new UserRepository(new UserApiClient(client)));
+-  }
+-  getUser(id: number): Promise<User> { return this.service.loadUser(id); }
++  constructor(private readonly client: HttpClient) {}
++  getUser(id: number): Promise<User> { return this.client.get<User>(`/users/${id}`); }
+ }
+diff --git a/src/userRepository.ts b/src/userRepository.ts
+deleted file mode 100644
+index 1406625..0000000
+--- a/src/userRepository.ts
++++ /dev/null
+@@ -1,7 +0,0 @@
+-import type { User } from "./client.js";
+-import { UserApiClient } from "./userApiClient.js";
+-/** Single-use: only UserService calls this. */
+-export class UserRepository {
+-  constructor(private readonly api: UserApiClient) {}
+-  findById(id: number): Promise<User> { return this.api.fetchUser(id); }
+-}
+diff --git a/src/userService.ts b/src/userService.ts
+deleted file mode 100644
+index 5c42448..0000000
+--- a/src/userService.ts
++++ /dev/null
+@@ -1,7 +0,0 @@
+-import type { User } from "./client.js";
+-import { UserRepository } from "./userRepository.js";
+-/** Single-use: only UserFetcher calls this. */
+-export class UserService {
+-  constructor(private readonly repo: UserRepository) {}
+-  loadUser(id: number): Promise<User> { return this.repo.findById(id); }
+-}
