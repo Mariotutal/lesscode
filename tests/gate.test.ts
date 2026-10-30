@@ -42,6 +42,27 @@ describe("symbol graph", () => {
     expect([...graph.get("a.ts")!.exports.keys()]).toEqual(["helper", "x"]);
     expect(graph.get("a.ts")!.referencedByOthers.has("helper")).toBe(true);
   });
+
+  it("LES-10 sample: credits only the file the specifier resolves to", () => {
+    // Regression: name-matching credited formatMoney to both a.ts and b.ts.
+    // The checker resolves `./a.js` to a.ts only, so b.ts must get no credit.
+    const graph = buildSymbolGraph(new Map([
+      ["a.ts", "export function formatMoney(n: number) { return '$' + n; }"],
+      ["b.ts", "export function formatMoney(n: number) { return '#' + n; }"],
+      ["c.ts", 'import { formatMoney } from "./a.js";\nexport const out = formatMoney(1);'],
+    ]));
+    expect(graph.get("a.ts")!.referencedByOthers.has("formatMoney")).toBe(true);
+    expect(graph.get("b.ts")!.referencedByOthers.has("formatMoney")).toBe(false);
+  });
+
+  it("resolves aliased and namespace imports to the declaring file", () => {
+    const graph = buildSymbolGraph(new Map([
+      ["src/a.ts", "export function helper() { return 1; }"],
+      ["src/b.ts", 'import { helper as h } from "./a";\nexport const y = h();'],
+      ["src/c.ts", 'import * as a from "./a.js";\nexport const z = a.helper();'],
+    ]));
+    expect(graph.get("src/a.ts")!.referencedByOthers.has("helper")).toBe(true);
+  });
 });
 
 describe("gate proofs", () => {
