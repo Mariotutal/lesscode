@@ -151,6 +151,43 @@ META_API_KEY=... npx tsx src/simplify/cli.ts --repo <dir> --base base \
 npm test   # tests/simplify.test.ts drives simplify() with a scripted model
 ```
 
+## Pull-request caller (LES-7)
+
+`src/pr/` is a third caller of the same simplify function — no second
+pipeline, and no edits to `src/simplify`, `src/plan`, `src/classify`,
+or `src/gate`. A pull request declares its base ref and intent in a
+file it carries, `lesscode-pr.json` at the checkout root:
+
+```json
+{ "baseRef": "base", "intent": ["src/a.ts", "src/b.ts"], "relatedTests": ["tests"] }
+```
+
+`runPrSimplifyCheck({ checkout })` (`src/pr/pr.ts`) resolves the
+checkout, the base ref, and the intent from that declaration, calls
+`simplifyTool`, and posts the returned gate result as a check
+(`lesscode/simplify`): the check **body is exactly
+`JSON.stringify(result.gate)`**, and the conclusion is derived from
+the gate alone (`success` iff the gate ran and accepted, else
+`failure` — including a refused run whose edits never reached the
+gate, where the gate is `null`). Findings and plan text never decide
+the conclusion, so a failing gate can be a required check. The
+`patch` in the result is what the caller may apply; this caller does
+not apply it, does not modify the pull request branch, and does not
+merge.
+
+```bash
+npx tsx src/pr/cli.ts --repo <pr-checkout> [--result <file>]   # thin CLI adapter: check JSON on stdout,
+                                                               # exit 0 success / 1 failing gate / 2 run failure
+npm test   # tests/pr.test.ts drives the PR caller with a scripted model
+```
+
+Proofs (`tests/pr.test.ts`, scripted Spark+Wonder, no live model, no
+sealed reads): on local pull-request fixtures (fixture 2 accepted,
+fixture 4 refused) the PR caller produces the **same verdict and gate
+result as calling `simplify` directly** (`toEqual` on the whole
+result), the check body is that gate result, and the PR branch HEAD
+and working tree are unchanged.
+
 ## Simplify as one tool (LES-6)
 
 `src/tool/` exposes that same function as one tool another agent can call:

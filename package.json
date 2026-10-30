@@ -9,6 +9,7 @@
     "plan": "tsx src/plan/cli.ts",
     "simplify": "tsx src/simplify/cli.ts",
     "simplify-tool": "tsx src/tool/cli.ts",
+    "pr-check": "tsx src/pr/cli.ts",
     "test": "vitest run tests",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests"
