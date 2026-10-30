@@ -12,7 +12,7 @@ import { buildSymbolGraph } from "../gate/symbolGraph.js";
 import { evaluateGate, type GateResult } from "../gate/gate.js";
 import { applyPlan } from "../plan/apply.js";
 import { planOnce, WONDER_MODEL, type AnyFinding } from "../plan/plan.js";
-import type { PlannedEdit } from "../plan/schema.js";
+import type { PlannedEdit, ReviewNoteItem } from "../plan/schema.js";
 
 const exec = promisify(execFile);
 
@@ -25,6 +25,12 @@ export interface SimplifyOptions {
   relatedTests?: string[];
   sparkClient?: GuestClient;
   wonderClient?: GuestClient;
+  /**
+   * Internal (review): invoked when the gate rejects an edit, so the
+   * caller can replace a note item that ordered that edit. Receives
+   * (findingIndex, human gate reason). Not part of the public shape.
+   */
+  onGateRejected?: GateRejectedHook;
 }
 
 export interface SimplifyResult {
@@ -34,7 +40,11 @@ export interface SimplifyResult {
   findings: AnyFinding[];
   gate: GateResult | null;
   droppedFindings: number;
-  plan: { edits: number; skipped: { findingIndex: number; reason: string }[]; model: string; modelCalls: number; usage?: unknown };
+  plan: { edits: number; skipped: { findingIndex: number; reason: string }[]; model: string; modelCalls: number; usage?: unknown; review: ReviewNoteItem[] };
+  /** Convention names written in the checkout's lesscode-conventions.json. */
+  registry: string[];
+  /** model's convention-break findings refused because unregistered (note-only practices). */
+  refusedConventions: { convention: string; file: string; citations: { file: string; startLine: number; endLine: number }[]; rationale: string }[];
   apply: { applied: unknown[]; skipped: { findingIndex: number; reason: string }[]; repairCalls: number };
   reasons: string[];
 }
@@ -45,8 +55,11 @@ async function git(repo: string, args: string[]): Promise<string> {
 }
 
 function isTestPath(f: string): boolean {
-  return /(^|\/)tests?\//.test(f) || /\.test\.ts$/.test(f) || isSealedPath(f);
+  return /(^|\/)tests?\//.test(f) || /\.test\.[cm]?[jt]sx?$/.test(f) || isSealedPath(f);
 }
+
+/** Public: gate-rejection hook used by review to rewrite the note. */
+export type GateRejectedHook = (findingIndex: number, reason: string) => void;
 
 interface Snapshot { file: string; content: string | null }
 function snapshot(repo: string, files: string[]): Snapshot[] {
@@ -127,7 +140,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     const headTree = new Map(sources.map((s) => [s.file, s.text]));
     const referenced = referencingFiles(headTree);
     const importersOf = (target: string): Set<string> => {
-      const stem = target.replace(/\.ts$/, "");
+      const stem = target.replace(/\.[cm]?[jt]sx?$/, "");
       const out = new Set<string>();
       for (const s of sources) {
         if (s.file === target) continue;
@@ -138,7 +151,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
           for (const seg of `${s.file.split("/").slice(0, -1).join("/")}/${spec}`.split("/")) {
             if (seg === "..") parts.pop(); else if (seg !== "." && seg !== "") parts.push(seg);
           }
-          if (parts.join("/").replace(/\.(js|ts)$/, "") === stem) out.add(s.file);
+          if (parts.join("/").replace(/\.[cm]?[jt]sx?$/, "") === stem) out.add(s.file);
         }
       }
       return out;
@@ -201,27 +214,35 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
         appliedAll.push(...apply.applied);
       } else {
         restoreSnap(scratch, before);
-        reasons.push(`finding ${edit.findingIndex} (${edit.action}) dropped: gate rejected (${gate.checks.filter((c) => !c.passed).map((c) => c.name).join(", ")})`);
+        const failed = gate.checks.filter((c) => !c.passed);
+        reasons.push(`finding ${edit.findingIndex} (${edit.action}) dropped: gate rejected (${failed.map((c) => c.name).join(", ")})`);
+        opts.onGateRejected?.(edit.findingIndex, `the gate rejected the edit for finding ${edit.findingIndex}: ${failed.map((c) => `${c.name} — ${c.detail}`).join("; ")}`);
       }
     }
 
-    const planSummary = { edits: plan.edits.length, skipped: plan.skipped, model: plan.model, modelCalls: plan.modelCalls, usage: plan.usage };
+    const planSummary = { edits: plan.edits.length, skipped: plan.skipped, model: plan.model, modelCalls: plan.modelCalls, usage: plan.usage, review: plan.review };
     const applySummary = { applied: appliedAll, skipped: skippedAll, repairCalls };
+    const refusedConventions = classification.refusedConventions.map((d) => ({
+      convention: d.finding.convention ?? "(none)",
+      file: d.finding.file,
+      citations: d.finding.citations,
+      rationale: d.status === "refused" ? d.reason : d.finding.rationale,
+    }));
 
     if (!appliedAll.length) {
-      return { verdict: "refused", patch: "", findings, gate: lastGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, reasons };
+      return { verdict: "refused", patch: "", findings, gate: lastGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, refusedConventions, reasons };
     }
 
     const finalGate = await evaluateGate({ repoDir: scratch, baseRef: headSha, editSet: [...new Set(keptEditSet)], relatedTests });
     if (!finalGate.accepted) {
       return {
-        verdict: "refused", patch: "", findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary,
+        verdict: "refused", patch: "", findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, refusedConventions,
         reasons: [...reasons, `final gate rejected: ${finalGate.checks.filter((c) => !c.passed).map((c) => c.name).join(", ")}`],
       };
     }
 
     const patch = await git(scratch, ["-c", "color.ui=false", "diff", "--no-color", headSha, "--", "."]);
-    return { verdict: "accepted", patch, findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, reasons };
+    return { verdict: "accepted", patch, findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, refusedConventions, reasons };
   } finally {
     await exec("git", ["worktree", "remove", "--force", scratch], { cwd: checkout }).catch(() => undefined);
     await exec("git", ["worktree", "prune"], { cwd: checkout }).catch(() => undefined);

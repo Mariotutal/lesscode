@@ -171,6 +171,9 @@ describe("classifier tool loop (stubbed wire)", () => {
     const dir = checkout({
       "src/a.ts": "export function f(): void {\n  console.log('x');\n}\n",
       "src/b.ts": "export const s = \"hi\";\n",
+      // LES-17: a practice is applied only when this repository wrote
+      // it in its convention registry.
+      "lesscode-conventions.json": JSON.stringify({ conventions: ["no-console-log"] }),
     });
     const client = stubClient([
       {
