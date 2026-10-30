@@ -151,6 +151,32 @@ META_API_KEY=... npx tsx src/simplify/cli.ts --repo <dir> --base base \
 npm test   # tests/simplify.test.ts drives simplify() with a scripted model
 ```
 
+## Simplify as one tool (LES-6)
+
+`src/tool/` exposes that same function as one tool another agent can call:
+`SIMPLIFY_TOOL_DEF` (a function-calling definition named `simplify`) plus
+`simplifyTool.call(args)` in `src/tool/tool.ts`. The handler validates the
+arguments (`src/tool/schema.ts`, zod) and forwards them verbatim to
+`simplify` — no second pipeline, and the caller does not re-decide the
+verdict. It returns the `SimplifyResult` unchanged: `verdict`, `patch`,
+`findings`, and `gate`.
+
+The full contract — arguments, the two verdicts (`accepted` / `refused`,
+with `patch` empty on refusal), and the rule that a run leaves the caller
+branch unchanged (edits live in a scratch worktree; a refused run in
+particular changes nothing) — is in [`docs/simplify-tool.md`](docs/simplify-tool.md).
+
+```bash
+META_API_KEY=... npx tsx src/tool/cli.ts --repo <dir> --base base \
+  --intent src/a.ts,src/b.ts [--tests tests]   # thin CLI adapter over the tool
+npm test   # tests/tool.test.ts drives the tool with a scripted model
+```
+
+Proofs (`tests/tool.test.ts`, scripted Spark+Wonder, no live model): the
+tool result `toEqual`s the direct `simplify()` result on fixture 2
+(accepted, duplicate helper retargeted) and on fixture 4 (refused,
+load-bearing client not inlined, caller HEAD and working tree unchanged).
+
 Proofs (`tests/simplify.test.ts`, scripted Spark+Wonder, no live model, no
 sealed reads): fixture 1 accepted (wrappers inlined, caller branch
 unchanged), fixture 2 accepted (duplicate helper retargeted), fixture 3
