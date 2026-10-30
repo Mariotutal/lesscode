@@ -188,6 +188,18 @@ describe("review", () => {
     expect(noteRun.review.items.some((i) => i.kind === "practice" && i.text.includes("no-console-log"))).toBe(true);
   }, 300_000);
 
+  it("LES-19: drops note items citing files outside the change, keeps one Wonder call", async () => {
+    const dir = await materialize("7");
+    const { client, state } = scripted([], [], [
+      { kind: "boundary", text: "Outside the change: talks about an untouched file.", citations: [cite("vitest.config.ts", 1, 1)] },
+      { kind: "boundary", text: "About the changed report file.", citations: [cite("src/report.ts", 5, 10)] },
+    ]);
+    const r = await review({ checkout: dir, base: "base", intent: ["src/report.ts"], sparkClient: client, wonderClient: client });
+    expect(r.verdict).toBe("reviewed");
+    expect(r.review.items.map((i) => i.text)).toEqual(["About the changed report file."]);
+    expect(state.wonderCalls).toBe(1);
+  }, 300_000);
+
   it("failed only when the run itself cannot finish", async () => {
     const r = await review({ checkout: root, base: "base", intent: [] });
     expect(r.verdict).toBe("failed");

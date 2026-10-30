@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { changedFilesFromGit, readCheckoutSources } from "../classify/checkout.js";
+import { changedFilesFromGit, contextWindow, estimateTokens, readCheckoutSources, scopedReviewFiles } from "../classify/checkout.js";
 import type { GuestClient } from "../classify/client.js";
 import { classifyFindings } from "../classify/classify.js";
 import { createGuestClient } from "../classify/client.js";
@@ -110,15 +110,29 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     }
 
     const changed = (await changedFilesFromGit(scratch, opts.base)).filter((f) => f !== "package-lock.json" && !f.endsWith("/") && f !== "node_modules");
+    // Review the change, not the whole checkout: models see intent +
+    // changed files, their one-hop neighbours, and related tests.
+    // If even that cannot fit the window, trim one-hop neighbours
+    // (lowest priority last) and fail before any request if the
+    // change itself still cannot fit.
+    let visible = scopedReviewFiles(scratch, { intentFiles: opts.intent, changedFiles: changed, relatedTests });
+    const sparkModel = opts.sparkClient?.config.model ?? "muse-spark-1.3";
+    const seeds = new Set([...opts.intent, ...changed]);
+    const fits = (files: string[], model: string) => estimateTokens(readCheckoutSources(scratch, files).map((s) => s.text).join("\n")) <= contextWindow(model);
+    // Never trim a seed: only one-hop neighbours/related tests go.
+    // If the change itself still does not fit, classifyFindings
+    // fails before the request with the size in the error.
+    while (visible.length && !seeds.has(visible.at(-1)!) && !fits(visible, sparkModel)) visible = visible.slice(0, -1);
     const classification = await classifyFindings({
       checkoutDir: scratch,
+      files: visible,
       scopeCreep: { changedFiles: changed, intentFiles: opts.intent },
       client: opts.sparkClient,
     });
     const findings = classification.findings;
 
     const wonder = opts.wonderClient ?? createGuestClient({ env: { ...process.env, META_MODEL: WONDER_MODEL } });
-    const plan = await planOnce({ checkoutDir: scratch, findings, client: wonder });
+    const plan = await planOnce({ checkoutDir: scratch, findings, files: visible, client: wonder });
 
     // Candidate edits: planner's, plus code-mandated scope-creep
     // restores the planner skipped (code decides creep, not the model).
@@ -136,7 +150,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     // unless every file referencing it is rewritten or deleted by
     // that same edit. Importers are computed from the checkout sources
     // (same resolution plan.ts uses for its allowed set).
-    const sources = readCheckoutSources(scratch);
+    const sources = readCheckoutSources(scratch, visible);
     const headTree = new Map(sources.map((s) => [s.file, s.text]));
     const referenced = referencingFiles(headTree);
     const importersOf = (target: string): Set<string> => {
@@ -183,6 +197,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     // dropped edit (e.g. fixture 5's complexity edit) never discards
     // an earlier kept edit.
     const keptEditSet: string[] = [];
+    const restoreFiles = new Set(findings.filter((f) => f.category === "scope-creep").map((f) => f.file));
     const appliedAll: unknown[] = [];
     const skippedAll: { findingIndex: number; reason: string }[] = [];
     let repairCalls = 0;
@@ -202,7 +217,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
       if (!apply.applied.length) continue;
 
       const candidateSet = [...new Set([...keptEditSet, ...apply.editSet])];
-      const gate = await evaluateGate({ repoDir: scratch, baseRef: headSha, editSet: candidateSet, relatedTests });
+      const gate = await evaluateGate({ repoDir: scratch, baseRef: headSha, editSet: candidateSet, relatedTests, coverageExempt: candidateSet.filter((f) => restoreFiles.has(f)) });
       lastGate = gate;
       // A lone scope-creep restore shrinks nothing by itself; keep it
       // when every non-size check passes. The final cumulative gate
@@ -233,7 +248,8 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
       return { verdict: "refused", patch: "", findings, gate: lastGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, refusedConventions, reasons };
     }
 
-    const finalGate = await evaluateGate({ repoDir: scratch, baseRef: headSha, editSet: [...new Set(keptEditSet)], relatedTests });
+    const finalEditSet = [...new Set(keptEditSet)];
+    const finalGate = await evaluateGate({ repoDir: scratch, baseRef: headSha, editSet: finalEditSet, relatedTests, coverageExempt: finalEditSet.filter((f) => restoreFiles.has(f)) });
     if (!finalGate.accepted) {
       return {
         verdict: "refused", patch: "", findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, refusedConventions,

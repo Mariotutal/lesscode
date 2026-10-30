@@ -1,6 +1,6 @@
 import { createGuestClient, type GuestClient, type ToolDefinition } from "./client.js";
 import { CONVENTIONS, loadRepositoryConventions } from "./conventions.js";
-import { readCheckoutSources, type CheckoutSource } from "./checkout.js";
+import { assertFitsWindow, readCheckoutSources, type CheckoutSource } from "./checkout.js";
 import { citationExists, filterByEvidence, isSealedPath } from "./evidence.js";
 import { decideConventionBreak, type ConventionDecision } from "./conventionBreak.js";
 import {
@@ -155,6 +155,7 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
     { role: "user" as const, content: `Classify the findings in this checkout:\n\n${prompt}` },
   ];
 
+  assertFitsWindow("classifier", client.config.model, prompt.length + systemPrompt().length);
   const rawOutputs: unknown[] = [];
   let validated: ClassifiedOutput | undefined;
   let lastIssues = "";
