@@ -1,0 +1,21 @@
+=== fixture 1 (bloated-pr) ===
+fixture: kept=3 dropped=0 refused=0 modelCalls=1
+  kept single-use-abstraction src/userApiClient.ts
+  kept single-use-abstraction src/userRepository.ts
+  kept single-use-abstraction src/userService.ts
+=== fixture 2 (bloated-pr) ===
+fixture: kept=1 dropped=0 refused=0 modelCalls=2
+  kept duplicate-helper src/checkout/formatMoney.ts
+=== fixture 3 (bloated-pr) ===
+fixture: kept=3 dropped=0 refused=0 modelCalls=1
+  kept scope-creep src/app.ts
+  kept scope-creep src/logger.ts
+  kept scope-creep src/styles/footerStyle.ts
+=== fixture 4 (bloated-pr) ===
+fixture: kept=2 dropped=0 refused=0 modelCalls=1
+  kept scope-creep src/features/orders.ts
+  kept scope-creep tests/orders.test.ts
+=== fixture 5 (bloated-pr) ===
+fixture: kept=0 dropped=0 refused=0 modelCalls=1
+  (none)
+ALL FIXTURE RUNS: every kept finding cites existing lines
