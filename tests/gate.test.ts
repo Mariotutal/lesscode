@@ -12,7 +12,7 @@ const exec = promisify(execFile);
 const root = process.cwd();
 
 async function sh(cwd: string, cmd: string, args: string[]) {
-  await exec(cmd, args, { cwd });
+  await exec(cmd, args, { cwd, maxBuffer: 10 * 1024 * 1024 });
 }
 
 describe("metrics", () => {
@@ -76,6 +76,30 @@ describe("gate proofs", () => {
     expect(result.metrics.sizeAfter).toBeLessThan(result.metrics.sizeBefore);
     const failed = result.checks.filter((c) => !c.passed).map((c) => c.name);
     expect(failed).toEqual(["cyclomatic-not-over-10pct"]);
+    expect(result.accepted).toBe(false);
+  }, 180_000);
+
+  it("rejects fixture 5 identically when the patch is committed", async () => {
+    // Regression for LES-9: diffing HEAD (not baseRef) judged a committed
+    // patch as an empty diff, so complexity/size/eslint checks saw nothing.
+    const tmp = mkdtempSync(join(tmpdir(), "lc-g5c-"));
+    await sh(root, "bash", ["fixtures/scripts/materialize5.sh", join(tmp, "f")]);
+    const repo = join(tmp, "f");
+    await sh(repo, "npm", ["install", "--no-audit", "--no-fund", "--silent"]);
+    await sh(repo, "git", ["checkout", "-q", "base"]);
+    // Pin baseRef to the base SHA so the commit below does not move it.
+    const { stdout: baseSha } = await exec("git", ["rev-parse", "base"], { cwd: repo, maxBuffer: 10 * 1024 * 1024 });
+    writeFileSync(join(repo, "src/pricing.ts"), readFileSync(join(root, "fixtures/5/bloated/src/pricing.ts"), "utf8"));
+    await sh(repo, "git", ["add", "src/pricing.ts"]);
+    await sh(repo, "git", ["-c", "user.email=gate@local", "-c", "user.name=gate", "commit", "-qm", "candidate patch"]);
+    const result = await evaluateGate({
+      repoDir: repo, baseRef: baseSha.trim(), editSet: ["src/pricing.ts"], relatedTests: ["tests"],
+    });
+    expect(result.exitCodes).toEqual({ tests: 0, tsc: 0, eslint: 0 });
+    expect(result.metrics.sizeAfter).toBeLessThan(result.metrics.sizeBefore);
+    const failed = result.checks.filter((c) => !c.passed).map((c) => c.name);
+    expect(failed).toEqual(["cyclomatic-not-over-10pct"]);
+    expect(result.checks.find((c) => c.name === "eslint-touched-passes")!.detail).toContain("src/pricing.ts");
     expect(result.accepted).toBe(false);
   }, 180_000);
 });

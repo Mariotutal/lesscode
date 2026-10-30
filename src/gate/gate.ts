@@ -31,12 +31,12 @@ export interface GateOptions {
 }
 
 async function run(cmd: string, args: string[], cwd: string): Promise<number> {
-  try { await exec(cmd, args, { cwd, maxBuffer: 10 * 1024 * 1024 }); return 0; }
+  try { await exec(cmd, args, { cwd, maxBuffer: 64 * 1024 * 1024 }); return 0; }
   catch (e) { const err = e as { code?: unknown }; return typeof err.code === "number" ? err.code : 1; }
 }
 
 async function git(repo: string, args: string[]): Promise<string> {
-  const { stdout } = await exec("git", args, { cwd: repo, maxBuffer: 10 * 1024 * 1024 });
+  const { stdout } = await exec("git", args, { cwd: repo, maxBuffer: 64 * 1024 * 1024 });
   return stdout;
 }
 
@@ -47,9 +47,10 @@ async function treeAt(repo: string, ref: string): Promise<Map<string, string>> {
   return out;
 }
 
-async function worktreeTree(repo: string, baseFiles: Map<string, string>): Promise<Map<string, string>> {
-  // patched tree = files changed vs base present in worktree + unchanged base files
-  const changed = (await git(repo, ["diff", "--name-only", "HEAD"])).split("\n").filter(Boolean);
+async function worktreeTree(repo: string, baseRef: string, baseFiles: Map<string, string>): Promise<Map<string, string>> {
+  // patched tree = files changed vs base present in worktree + unchanged base files.
+  // Diff against baseRef, not HEAD: a committed patch leaves `git diff HEAD` empty.
+  const changed = (await git(repo, ["diff", "--name-only", baseRef])).split("\n").filter(Boolean);
   const untracked = (await git(repo, ["ls-files", "--others", "--exclude-standard"])).split("\n").filter(Boolean);
   const out = new Map(baseFiles);
   for (const f of [...changed, ...untracked]) {
@@ -83,13 +84,15 @@ export async function evaluateGate(opts: GateOptions): Promise<GateResult> {
   const checks: GateCheck[] = [];
   const exitCodes: GateResult["exitCodes"] = { tests: null, tsc: null, eslint: null };
 
-  const diff = await git(repo, ["diff", "HEAD", "--", "."]);
-  const nameStatus = await git(repo, ["diff", "--name-status", "HEAD"]);
-  const changedFiles = nameStatus.split("\n").filter(Boolean).map((l) => l.split("\t").slice(1).join("\t"));
+  // Diff the worktree against baseRef (not HEAD) so committed and uncommitted
+  // candidate patches are judged identically.
+  const diff = await git(repo, ["diff", opts.baseRef, "--", "."]);
+  const nameStatus = await git(repo, ["diff", "--name-status", opts.baseRef]);
+  const changedFiles = nameStatus.split("\n").filter(Boolean).map((l) => l.split("\t").at(-1)!);
   const touchedTs = changedFiles.filter((f) => f.endsWith(".ts") && existsSync(join(repo, f)));
 
   const beforeTree = await treeAt(repo, opts.baseRef);
-  const afterTree = await worktreeTree(repo, beforeTree);
+  const afterTree = await worktreeTree(repo, opts.baseRef, beforeTree);
 
   // --- size (code lines only; comment-only hunks cannot win) ---
   const sumSize = (tree: Map<string, string>, files: string[]) =>
