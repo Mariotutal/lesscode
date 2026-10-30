@@ -54,8 +54,11 @@ Closed finding set:
   code** (`scopeCreep.ts`, from the git diff vs base minus the declared
   PR intent), never by the model (the zod schema rejects it)
 - **convention break** — apply a mechanical fix or refuse
-  (`conventions.ts` registry + `conventionBreak.ts`); unregistered or
-  inapplicable conventions are refused, never guessed at
+  (`conventions.ts` catalogue + `conventionBreak.ts`); since LES-17 a
+  fix is applied only when the repository also wrote the practice in
+  its own registry (`lesscode-conventions.json` at the checkout root).
+  Unregistered or inapplicable conventions are refused as edits and
+  belong in the review note, never guessed at
 
 Every finding must cite lines that exist in the checkout
 (`evidence.ts`): a finding whose file is missing, whose citations run
@@ -150,6 +153,56 @@ META_API_KEY=... npx tsx src/simplify/cli.ts --repo <dir> --base base \
   --intent src/a.ts,src/b.ts [--tests tests]
 npm test   # tests/simplify.test.ts drives simplify() with a scripted model
 ```
+
+## Lead review (LES-17)
+
+`src/review/` puts `review(checkout, base, intent)` in front of the
+current checker. `simplify` is unchanged as the engine underneath; the
+new function returns `{ applied, review, verdict, findings, gate }`:
+
+- `applied` — the gate-accepted patch (same string `simplify`
+  returns). Empty when no edit survives.
+- `review` — the cited senior note (`{ items, markdown }`). It is
+  never applied, and it is still returned when the patch is empty: a
+  run that returns only the note is a successful review.
+- `verdict` — `accepted` when the patch is non-empty and the gate
+  passed, `reviewed` when the note is the result and nothing was
+  applied, `failed` only when the run itself could not finish
+  (e.g. missing `intent`).
+
+One TypeScript program reads both languages: `allowJs` is on in the
+symbol graph (an import resolving to a `.js` file is credited by the
+checker) and in checkout source listing, while `checkJs` stays
+exactly as the repository set it — the gate's `tsc` step runs the
+repository tsconfig, and `review` only *reports* that setting in
+`detail.tsConfig`. Wonder is called **once** and returns the edit
+plan and the note together. Code filters the note: an item whose
+citation does not exist is dropped, and an item that orders an edit
+the gate rejected is replaced with the gate reason.
+
+A practice is applied only from the repository convention registry:
+the repository writes adopted convention names in
+`lesscode-conventions.json` at its root (`{"conventions": [...]}`).
+The classifier keeps a convention-break finding only when its name is
+in that registry and a mechanical fix applies; otherwise the finding
+is refused as an edit and surfaces as a `practice` note item.
+
+```bash
+META_API_KEY=... npx tsx src/review/cli.ts --repo <dir> --base base \
+  --intent src/a.ts,src/b.ts [--tests tests]
+npm test   # tests/review.test.ts drives review() with a scripted model
+```
+
+Proofs (`tests/review.test.ts`, scripted Spark+Wonder, no live model,
+no sealed reads): fixtures 1–5 keep their meaning (the whole suite
+passes unchanged); fixture 6 — a JavaScript single-use wrapper under
+`allowJs` — is inlined and gate-accepted with `checkJs` reported off;
+fixture 7 — a non-mechanical design problem (a receipt boundary that
+re-derives the invoice concept) — appears in the note and not in the
+patch (verdict `reviewed`); fixture 8 — `no-console-log` written in
+`lesscode-conventions.json` — is applied, and the same practice with
+the registry removed is only a `practice` note item. A note item
+ordering fixture 5's complexity edit is replaced by the gate reason.
 
 ## Simplify as one tool (LES-6)
 

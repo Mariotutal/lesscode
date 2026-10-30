@@ -24,6 +24,21 @@ on `base`, visible + sealed tests on `bloated-pr`, plus `tsc --noEmit`):
 bash fixtures/scripts/verify.sh
 ```
 
+Fixtures 6–8 (LES-17) extend the spec for the lead review; they have
+no `sealed/` suite (nothing under `fixtures/*/sealed/` was read or
+added for them):
+
+6. **JavaScript wrapper** — `src/userApi.js` is a single-use JS
+   wrapper under `allowJs` (`checkJs` off). Correct outcome: inline it
+   into `src/userLabel.js`, gate accepts.
+7. **Design note** — `renderReceipt` re-derives the invoice concept:
+   a non-mechanical design problem. Correct outcome: cited in the
+   review note, absent from the patch (verdict `reviewed`).
+8. **Registry practice** — `console.log` in `src/greet.ts`, with
+   `no-console-log` written in `lesscode-conventions.json`. Correct
+   outcome: the mechanical fix is applied; with the registry removed,
+   the same practice is only a `practice` note item.
+
 ## The four fixtures
 
 1. **Wrappers** — `UserApiClient` → `UserRepository` → `UserService` are three

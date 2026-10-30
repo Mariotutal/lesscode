@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { GuestClient } from "../classify/client.js";
 import { applyConventionFix } from "../classify/conventionBreak.js";
+import { loadRepositoryConventions } from "../classify/conventions.js";
 import { repairOutputSchema, type PlannedEdit } from "./schema.js";
 import { WONDER_MODEL } from "./plan.js";
 import type { AnyFinding } from "./plan.js";
@@ -90,6 +91,11 @@ export async function applyPlan(opts: {
 
     if (edit.action === "convention-fix") {
       if (finding.category !== "convention-break") { skipped.push({ findingIndex: edit.findingIndex, reason: "convention-fix on non-convention finding" }); continue; }
+      // Applied only from the repository convention registry.
+      if (!finding.convention || !loadRepositoryConventions(opts.checkoutDir).includes(finding.convention)) {
+        skipped.push({ findingIndex: edit.findingIndex, reason: `convention "${finding.convention ?? "(none)"}" is not in the repository convention registry; note only, not applied` });
+        continue;
+      }
       const fixed = applyConventionFix(opts.checkoutDir, finding);
       if (fixed === undefined) { skipped.push({ findingIndex: edit.findingIndex, reason: "mechanical fix changed nothing; refused" }); continue; }
       const before = snap(opts.checkoutDir, [finding.file]);

@@ -1,6 +1,8 @@
 /**
- * Mechanical convention registry — the fix half of "convention break:
- * apply a mechanical fix, otherwise refuse" (AGENTS.md closed set).
+ * Mechanical convention registry — the catalogue of practices code
+ * knows how to fix. A fix is applied only when the repository also
+ * lists the practice in its own registry (lesscode-conventions.json,
+ * see loadRepositoryConventions below).
  *
  * A convention-break finding is kept only when a registered, purely
  * mechanical fix applies to the cited text (and the fix changes it).
@@ -50,6 +52,34 @@ export const CONVENTIONS: readonly ConventionFix[] = [
   },
 ];
 
-export function findConvention(name: string): ConventionFix | undefined {
+export function findConvention(name: string, registeredInRepo?: ReadonlySet<string>): ConventionFix | undefined {
+  if (registeredInRepo && !registeredInRepo.has(name)) return undefined;
   return CONVENTIONS.find((c) => c.name === name);
+}
+
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
+/** File at the checkout root where a repository writes its adopted conventions down. */
+export const CONVENTION_REGISTRY_FILE = "lesscode-conventions.json";
+
+/**
+ * The repository convention registry: the convention names this
+ * repository has written down in `lesscode-conventions.json`
+ * (`{"conventions": ["no-console-log", ...]}`). A mechanical fix may
+ * be APPLIED only for a name listed here. The same practice, absent
+ * from the registry, is refused as an edit and belongs in the review
+ * note instead (project description: "A practice is applied only
+ * when the repository has it written in the convention registry.").
+ */
+export function loadRepositoryConventions(checkoutDir: string): string[] {
+  const path = join(checkoutDir, CONVENTION_REGISTRY_FILE);
+  if (!existsSync(path)) return [];
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as { conventions?: unknown };
+    if (!Array.isArray(parsed.conventions)) return [];
+    return parsed.conventions.filter((c): c is string => typeof c === "string");
+  } catch {
+    return [];
+  }
 }
