@@ -1,0 +1,33 @@
+=== fixture 1 (bloated-pr, expect: accepted) ===
+  classify: findings=3 dropped=0 sparkCalls=1 usage={"completion_tokens":3459,"prompt_tokens":1998,"total_tokens":5457,"completion_tokens_details":{"reasoning_tokens":2984},"prompt_tokens_details":{"cached_tokens":1905}}
+  plan(muse-wonder-1.0): wonderCalls=1 edits=3 planSkipped=0 usage={"completion_tokens":3488,"prompt_tokens":1919,"total_tokens":5407,"completion_tokens_details":{"reasoning_tokens":2691},"prompt_tokens_details":{"cached_tokens":0}}
+  apply: applied=3 skipped=0 repairCalls=0 repairUsage=null
+    applied #0 inline -> src/userRepository.ts,src/userFetcher.ts,src/userApiClient.ts
+    applied #1 inline -> src/userService.ts,src/userFetcher.ts,src/userRepository.ts
+    applied #2 inline -> src/userFetcher.ts,src/userService.ts
+  gate: accepted=true size=53->33
+  VERDICT: AS EXPECTED (accepted)
+  diff:  src/userApiClient.ts  | 6 ------
+  diff:  src/userFetcher.ts    | 9 +++------
+  diff:  src/userRepository.ts | 7 -------
+  diff:  src/userService.ts    | 7 -------
+  diff:  4 files changed, 3 insertions(+), 26 deletions(-)
+=== fixture 2 (bloated-pr, expect: accepted) ===
+  classify: findings=1 dropped=0 sparkCalls=1 usage={"completion_tokens":1169,"prompt_tokens":1841,"total_tokens":3010,"completion_tokens_details":{"reasoning_tokens":954},"prompt_tokens_details":{"cached_tokens":1137}}
+  plan(muse-wonder-1.0): wonderCalls=1 edits=1 planSkipped=0 usage={"completion_tokens":701,"prompt_tokens":1609,"total_tokens":2310,"completion_tokens_details":{"reasoning_tokens":460},"prompt_tokens_details":{"cached_tokens":0}}
+  apply: applied=1 skipped=0 repairCalls=0 repairUsage=null
+    applied #0 retarget -> src/checkout/checkout.ts,src/checkout/formatMoney.ts
+  gate: accepted=true size=32->25
+  VERDICT: AS EXPECTED (accepted)
+  diff:  src/checkout/checkout.ts    | 2 +-
+  diff:  src/checkout/formatMoney.ts | 8 --------
+  diff:  2 files changed, 1 insertion(+), 9 deletions(-)
+=== fixture 4 (bloated-pr, expect: refused-or-rejected) ===
+  classify: findings=2 dropped=0 sparkCalls=1 usage={"completion_tokens":1080,"prompt_tokens":2125,"total_tokens":3205,"completion_tokens_details":{"reasoning_tokens":1009},"prompt_tokens_details":{"cached_tokens":2033}}
+  plan(muse-wonder-1.0): wonderCalls=1 edits=0 planSkipped=2 usage={"completion_tokens":1736,"prompt_tokens":1891,"total_tokens":3627,"completion_tokens_details":{"reasoning_tokens":1515},"prompt_tokens_details":{"cached_tokens":884}}
+    plan-skip #0: planner skipped: Not proven scope-creep: src/features/orders.ts is exported via src/index.ts and exercised by tests/orders.test.ts as the second feature sharing the load-bearing SharedApiClient. Restoring/deleting it would break that shared-use contract; when in doubt, skip.
+    plan-skip #1: planner skipped: Never edit tests. tests/orders.test.ts locks the two-feature SharedApiClient behaviour (both receive unwrapped data); restoring it away would remove that verification and mask breaking the orders feature.
+  apply: applied=0 skipped=0 repairCalls=0 repairUsage=null
+  gate: not run (no patch applied) — refused
+  VERDICT: AS EXPECTED (refused-or-rejected)
+ALL FIXTURE RUNS DONE (status=0)

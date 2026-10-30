@@ -6,6 +6,7 @@
   "scripts": {
     "gate": "tsx src/gate/cli.ts",
     "classify": "tsx src/classify/cli.ts",
+    "plan": "tsx src/plan/cli.ts",
     "test": "vitest run tests",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests"
