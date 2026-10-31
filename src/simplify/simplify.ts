@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { changedFilesFromGit, contextWindow, estimateTokens, readCheckoutSources, scopedReviewFiles } from "../classify/checkout.js";
+import { changedFilesFromGit, contextWindow, estimateTokens, expandIntentFiles, readCheckoutSources, scopedReviewFiles, listClassifiableFiles } from "../classify/checkout.js";
 import type { GuestClient } from "../classify/client.js";
 import { classifyFindings } from "../classify/classify.js";
 import { createGuestClient } from "../classify/client.js";
@@ -44,6 +44,7 @@ export interface SimplifyResult {
   plan: { edits: number; skipped: { findingIndex: number; reason: string }[]; model: string; modelCalls: number; usage?: unknown; review: ReviewNoteItem[] };
   /** Convention names written in the checkout's lesscode-conventions.json. */
   registry: string[];
+  unknownConventions: string[];
   /** model's convention-break findings refused because unregistered (note-only practices). */
   refusedConventions: { convention: string; file: string; citations: { file: string; startLine: number; endLine: number }[]; rationale: string }[];
   apply: { applied: unknown[]; skipped: { findingIndex: number; reason: string }[]; repairCalls: number };
@@ -126,7 +127,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     // change itself still cannot fit.
     let visible = scopedReviewFiles(scratch, { intentFiles: opts.intent, changedFiles: changed, relatedTests });
     const sparkModel = opts.sparkClient?.config.model ?? "muse-spark-1.3";
-    const seeds = new Set([...opts.intent, ...changed]);
+    const seeds = new Set([...expandIntentFiles(listClassifiableFiles(scratch), opts.intent), ...changed]);
     const fits = (files: string[], model: string) => estimateTokens(readCheckoutSources(scratch, files).map((s) => s.text).join("\n")) <= contextWindow(model);
     // Never trim a seed: only one-hop neighbours/related tests go.
     // If the change itself still does not fit, classifyFindings
@@ -141,7 +142,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     const findings = classification.findings;
 
     const wonder = opts.wonderClient ?? createGuestClient({ env: { ...process.env, META_MODEL: WONDER_MODEL } });
-    const plan = await planOnce({ checkoutDir: scratch, findings, files: visible, client: wonder });
+    const plan = await planOnce({ checkoutDir: scratch, findings, files: visible, changedFiles: changed, baseRef: opts.base, client: wonder });
     const planDropNotified = new Set<number>();
     // A finding the planner skipped (e.g. verification dropped the
     // broad helper finding before planning, so Wonder refuses it as
@@ -171,7 +172,13 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     // named by any candidate edit, and no repair turn is needed for a
     // missed importer. The guard that remains is the codemod's own
     // skip plus tsc and the gate rejecting the cumulative result.
-    const reasons: string[] = [];
+    const reasons: string[] = [
+      ...classification.scopeExemptions.map((e) => e.reason),
+      ...classification.unknownConventions.map((n) => `unknown convention "${n}" in lesscode-conventions.json: not a known convention, so it is ignored and no fix is applied for it`),
+      // A finding that is kept and produces no patch records why.
+      ...classification.verificationDropped.map((d) => `finding for ${d.finding.file} kept out of the patch: ${d.reason}`),
+      ...classification.refusedConventions.map((d) => `finding for ${d.finding.file} kept and produces no patch: ${d.status === "refused" ? d.reason : d.finding.rationale}`),
+    ];
     const edits: PlannedEdit[] = [];
     for (const e of candidates) {
       const f = findings[e.findingIndex];
@@ -252,7 +259,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     }));
 
     if (!appliedAll.length) {
-      return { verdict: "refused", patch: "", findings, gate: lastGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, refusedConventions, reasons };
+      return { verdict: "refused", patch: "", findings, gate: lastGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, unknownConventions: classification.unknownConventions, refusedConventions, reasons };
     }
 
     const finalEditSet = [...new Set(keptEditSet)];
@@ -272,13 +279,13 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     };
     if (!finalGate.accepted) {
       return {
-        verdict: "refused", patch: "", findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, refusedConventions,
+        verdict: "refused", patch: "", findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, unknownConventions: classification.unknownConventions, refusedConventions,
         reasons: [...reasons, `final gate rejected: ${finalGate.checks.filter((c) => !c.passed).map((c) => c.name).join(", ")}`],
       };
     }
 
     const patch = await git(scratch, ["-c", "color.ui=false", "diff", "--no-color", headSha, "--", "."]);
-    return { verdict: "accepted", patch, findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, refusedConventions, reasons };
+    return { verdict: "accepted", patch, findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, unknownConventions: classification.unknownConventions, refusedConventions, reasons };
   } finally {
     await exec("git", ["worktree", "remove", "--force", scratch], { cwd: checkout }).catch(() => undefined);
     await exec("git", ["worktree", "prune"], { cwd: checkout }).catch(() => undefined);

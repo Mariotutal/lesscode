@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { promisify } from "node:util";
+import ts from "typescript";
 import { isSealedPath } from "./evidence.js";
 
 const exec = promisify(execFile);
@@ -58,6 +59,59 @@ export function isTestFile(file: string): boolean {
  * (allowJs); the intent/changed files themselves are always visible,
  * and TypeScript is always eligible. Sealed paths are never included.
  */
+/** Intent entries may name a file, a directory, or a glob (`*`, `**`, `?`). */
+export function matchesIntent(file: string, intent: readonly string[]): boolean {
+  return intent.some((entry) => {
+    const e = entry.replace(/^\.\//, "").replace(/\/$/, "");
+    if (!e) return false;
+    if (!/[*?]/.test(e)) return file === e || file.startsWith(`${e}/`);
+    const re = new RegExp(`^${e.split("**").map((part) => part.split("*").map((s) => s.split("?").map((q) => q.replace(/[.+^${}()|[\]\\]/g, "\\$&")).join(".")).join("[^/]*")).join(".*")}$`);
+    return re.test(file);
+  });
+}
+
+export function expandIntentFiles(files: readonly string[], intent: readonly string[]): string[] {
+  return files.filter((f) => matchesIntent(f, intent));
+}
+
+/** Paths that cannot change behaviour: exempt from scope-creep restoration by default. */
+export function isNonBehaviourPath(file: string): boolean {
+  const base = file.split("/").at(-1)!;
+  if (/(^|\/)docs?\//.test(file) || /\.(md|mdx|rst|adoc)$/i.test(file) || /^(LICENSE|NOTICE|CHANGELOG)(\.|$)/i.test(base)) return true;
+  return /^(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|Cargo\.lock|Gemfile\.lock|poetry\.lock|composer\.lock|Pipfile\.lock)$/.test(base);
+}
+
+/** Line numbers (new-file side) changed vs `baseRef`, per file, from `git diff -U0`. */
+export async function changedLinesFromGit(checkoutDir: string, baseRef: string): Promise<Map<string, Set<number>>> {
+  const out = new Map<string, Set<number>>();
+  let diff = "";
+  try { diff = await git(checkoutDir, ["diff", "-U0", "--no-color", baseRef]); } catch { return out; }
+  let file: string | undefined;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+++ b/")) { file = line.slice(6); if (!out.has(file)) out.set(file, new Set()); continue; }
+    const m = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (m && file) { const start = Number(m[1]); const count = m[2] === undefined ? 1 : Number(m[2]); for (let i = 0; i < count; i++) out.get(file)!.add(start + i); }
+  }
+  return out;
+}
+
+function isTypeOnlyImporterOf(checkoutDir: string, file: string, targets: Set<string>, allSet: Set<string>): boolean {
+  let text: string;
+  try { text = readFileSync(join(checkoutDir, file), "utf8"); } catch { return false; }
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  let saw = false;
+  for (const node of sf.statements) {
+    if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier) || !node.moduleSpecifier.text.startsWith(".")) continue;
+    const resolved = resolveSpecifier(file, node.moduleSpecifier.text, allSet);
+    if (!resolved || !targets.has(resolved)) continue;
+    saw = true;
+    const clause = node.importClause;
+    const typeOnly = !!clause && (clause.isTypeOnly || (!!clause.namedBindings && ts.isNamedImports(clause.namedBindings) && clause.namedBindings.elements.every((e) => e.isTypeOnly) && !clause.name));
+    if (!typeOnly) return false;
+  }
+  return saw;
+}
+
 export function scopedReviewFiles(
   checkoutDir: string,
   opts: { intentFiles: readonly string[]; changedFiles?: readonly string[]; relatedTests?: readonly string[] },
@@ -76,7 +130,8 @@ export function scopedReviewFiles(
   const push = (f: string, force = false): void => {
     if (!seeds.has(f) && allSet.has(f) && (force || jsAllowed(f))) { seeds.add(f); ordered.push(f); }
   };
-  for (const f of [...opts.intentFiles, ...(opts.changedFiles ?? [])]) push(f, true);
+  for (const f of expandIntentFiles(all, opts.intentFiles)) push(f, true);
+  for (const f of opts.changedFiles ?? []) push(f, true);
   // Related tests explicitly named, else tests that import a seed.
   const tests = (opts.relatedTests ?? []).flatMap((t) =>
     all.filter((f) => f === t || f.startsWith(t.endsWith("/") ? t : `${t}/`)),
@@ -88,7 +143,10 @@ export function scopedReviewFiles(
   // One hop: what the seeds import, and what imports the seeds.
   const imports = new Map<string, Set<string>>();
   for (const f of all) imports.set(f, relativeImportsOf(checkoutDir, f, allSet));
-  for (const f of all) for (const t of imports.get(f)!) if (seeds.has(t)) push(f);
+  // A file that only imports a type from a seed is not part of the
+  // review context/note; it remains visible to code (symbol graph /
+  // verification over the whole checkout) for shared-symbol decisions.
+  for (const f of all) for (const t of imports.get(f)!) if (seeds.has(t) && !isTypeOnlyImporterOf(checkoutDir, f, seeds, allSet)) push(f);
   for (const f of [...seeds]) for (const t of imports.get(f) ?? []) push(t);
   return ordered;
 }
@@ -167,13 +225,11 @@ export interface CheckoutTsConfig {
  */
 export function readTsConfig(checkoutDir: string): CheckoutTsConfig {
   try {
-    const parsed = JSON.parse(readFileSync(join(checkoutDir, "tsconfig.json"), "utf8")) as {
-      compilerOptions?: { allowJs?: unknown; checkJs?: unknown };
-    };
-    return {
-      allowJs: parsed.compilerOptions?.allowJs === true,
-      checkJs: parsed.compilerOptions?.checkJs === true,
-    };
+    const path = join(checkoutDir, "tsconfig.json");
+    const read = ts.readConfigFile(path, ts.sys.readFile);
+    if (read.error || !read.config) return { allowJs: false, checkJs: false };
+    const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, checkoutDir);
+    return { allowJs: parsed.options.allowJs === true, checkJs: parsed.options.checkJs === true };
   } catch {
     return { allowJs: false, checkJs: false };
   }
@@ -181,9 +237,9 @@ export function readTsConfig(checkoutDir: string): CheckoutTsConfig {
 
 /** Non-empty changed-file list from git (names only; no content from sealed dirs). */
 export async function changedFilesFromGit(checkoutDir: string, baseRef: string): Promise<string[]> {
+  // Tracked changes only: an untracked local file is not part of the PR.
   const tracked = await git(checkoutDir, ["diff", "--name-only", baseRef]);
-  const untracked = await git(checkoutDir, ["ls-files", "--others", "--exclude-standard"]);
-  const names = [...tracked.split("\n"), ...untracked.split("\n")]
+  const names = tracked.split("\n")
     .map((s) => s.trim())
     .filter(Boolean)
     .filter((f) => !isSealedPath(f) && !f.includes("node_modules/"));
