@@ -43,7 +43,8 @@ export function listClassifiableFiles(checkoutDir: string): string[] {
 const JS_FILE_RE = /\.[cm]?jsx?$/;
 
 export function isTestFile(file: string): boolean {
-  return /(^|\/)tests?\//.test(file) || /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(file) || file.includes("__tests__/");
+  return /(^|\/)tests?\//.test(file) || /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(file) || file.includes("__tests__/")
+    || /(^|\/)tests?\.[cm]?[jt]sx?$/.test(file);
 }
 
 /**
@@ -107,9 +108,10 @@ function resolveSpecifier(fromFile: string, spec: string, allSet: Set<string>): 
 function relativeImportsOf(checkoutDir: string, file: string, allSet: Set<string>): Set<string> {
   const out = new Set<string>();
   const text = readFileSync(join(checkoutDir, file), "utf8");
-  for (const m of text.matchAll(/(?:from|import)\s*\(?\s*["']([^"']+)["']/g)) {
-    if (!m[1]!.startsWith(".")) continue;
-    const r = resolveSpecifier(file, m[1]!, allSet);
+  for (const m of text.matchAll(/(?:from|import|require)\s*\(\s*["']([^"']+)["']|(?:from|import)\s+["']([^"']+)["']/g)) {
+    const spec = m[1] ?? m[2]!;
+    if (!spec.startsWith(".")) continue;
+    const r = resolveSpecifier(file, spec, allSet);
     if (r) out.add(r);
   }
   return out;

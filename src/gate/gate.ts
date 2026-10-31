@@ -44,7 +44,8 @@ export function repoCommands(repo: string): { test?: string; typecheck?: string;
 }
 
 export function isTestFilePath(f: string): boolean {
-  return /(^|\/)tests?\//.test(f) || /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(f) || f.includes("__tests__/");
+  return /(^|\/)tests?\//.test(f) || /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(f) || f.includes("__tests__/")
+    || /(^|\/)tests?\.[cm]?[jt]sx?$/.test(f);
 }
 
 /**
@@ -67,7 +68,7 @@ export function coveringTests(tree: Map<string, string>, file: string): string[]
   const importsOf = new Map<string, string[]>();
   for (const f of allFiles) {
     const text = tree.get(f)!;
-    importsOf.set(f, [...text.matchAll(/(?:from|import)\s*\(?\s*["']([^"']+)["']/g)].map((m) => m[1]!).filter((s) => s.startsWith(".")).map((s) => resolve(f, s)).filter((x): x is string => Boolean(x)));
+    importsOf.set(f, [...text.matchAll(/(?:from|import|require)\s*\(\s*["']([^"']+)["']|(?:from|import)\s+["']([^"']+)["']/g)].map((m) => m[1] ?? m[2]!).filter((s) => s.startsWith(".")).map((s) => resolve(f, s)).filter((x): x is string => Boolean(x)));
   }
   const reaches = (start: string): boolean => {
     const seen = new Set<string>(); const stack = [start];
@@ -127,7 +128,7 @@ function testDeletionCheck(diff: string): { passed: boolean; detail: string } {
   let currentFile = "";
   for (const line of diff.split("\n")) {
     if (line.startsWith("+++ b/")) currentFile = line.slice(6);
-    const isTestFile = /(^|\/)(tests?|sealed)\//.test(currentFile) || /\.test\.ts$/.test(currentFile);
+    const isTestFile = isTestFilePath(currentFile) || /(^|\/)sealed\//.test(currentFile);
     if (line.startsWith("-") && !line.startsWith("---") && isTestFile && /\b(it|test|describe)\s*\(/.test(line)) removedTests.push(currentFile);
     if (line.startsWith("+") && /\.(skip|todo)\s*\(|xit\s*\(|xdescribe\s*\(/.test(line)) skipAdded = true;
     if (line.startsWith("-") && !line.startsWith("---") && /deleted file/.test(line)) removedTests.push(currentFile);
@@ -201,7 +202,7 @@ export async function evaluateGate(opts: GateOptions): Promise<GateResult> {
   checks.push({ name: "exports-outside-edit-set-unchanged", passed: exportDiffs.length === 0, detail: exportDiffs.join("; ") || "exports outside edit set identical" });
 
   // --- tests not deleted/skipped ---
-  const deletedTestFiles = nameStatus.split("\n").filter((l) => l.startsWith("D")).map((l) => l.split("\t")[1] ?? "").filter((f) => /\.test\.ts$/.test(f) || /(^|\/)tests?\//.test(f));
+  const deletedTestFiles = nameStatus.split("\n").filter((l) => l.startsWith("D")).map((l) => l.split("\t")[1] ?? "").filter((f) => isTestFilePath(f));
   const td = testDeletionCheck(diff);
   checks.push({ name: "tests-not-deleted", passed: td.passed && deletedTestFiles.length === 0, detail: deletedTestFiles.length ? `deleted test files: ${deletedTestFiles.join(", ")}` : td.detail });
 

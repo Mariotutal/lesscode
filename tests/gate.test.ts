@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { evaluateGate, coveringTests, repoCommands } from "../src/gate/gate.js";
+import { evaluateGate, coveringTests, isTestFilePath, repoCommands } from "../src/gate/gate.js";
 import { measureSource } from "../src/gate/metrics.js";
 import { buildSymbolGraph } from "../src/gate/symbolGraph.js";
 
@@ -78,6 +78,21 @@ describe("LES-19 repo-aware gate", () => {
     expect(coveringTests(tree, "src/persist.ts")).toEqual(["tests/devtools.test.tsx"]);
     expect(coveringTests(tree, "src/demo.js")).toEqual([]);
   });
+  it("LES-31: isTestFilePath counts spec files and bare test.* files, not test helpers", () => {
+    for (const f of ["test.js", "test.ts", "test.mjs", "test.cjs", "src/withTimeout.spec.ts", "src/foo.test.tsx", "src/foo.test.js", "src/__tests__/foo.ts", "tests/foo.ts"]) expect(isTestFilePath(f), f).toBe(true);
+    for (const f of ["src/testHelper.ts", "src/contest.ts", "src/foo.ts", "src/latest.js", "TESTS/foo.ts"]) expect(isTestFilePath(f), f).toBe(false);
+  });
+  it("LES-31: coveringTests follows require() (relative only), including from a root test.js", () => {
+    const tree = new Map([
+      ["index.js", "module.exports = 1;\n"],
+      ["src/foo.ts", "export const f = 1;\n"],
+      ["src/hop.js", 'const { f } = require("./foo.js");\nmodule.exports = f;\n'],
+      ["test.js", 'const x = require("./index.js");\nconst y = require("./src/hop.js");\nconst z = require("express");\n'],
+    ]);
+    expect(coveringTests(tree, "index.js")).toEqual(["test.js"]);
+    expect(coveringTests(tree, "src/foo.ts")).toEqual(["test.js"]); // transitive via require in src/hop.js
+    expect(coveringTests(tree, "src/hop.js")).toEqual(["test.js"]);
+  });
   it("rejects an edit no related test covers, even when tests pass and size drops (zustand case)", async () => {
     const tmp = mkdtempSync(join(tmpdir(), "lc-g19-"));
     const repo = join(tmp, "f");
@@ -104,6 +119,58 @@ describe("LES-19 repo-aware gate", () => {
     expect(result.accepted).toBe(false);
     expect(result.checks.find((c) => c.name === "related-tests-pass")!.detail).toMatch(/no test command/);
   }, 180_000);
+});
+
+describe("LES-31 tests-not-deleted", () => {
+  // Minimal repo whose test command is a no-op so every check except
+  // tests-not-deleted is neutral; runCommands stays on to prove that.
+  async function bareRepo(files: Record<string, string>): Promise<string> {
+    const repo = mkdtempSync(join(tmpdir(), "lc-g31-"));
+    await sh(repo, "git", ["init", "-q", "-b", "base"]);
+    writeFileSync(join(repo, "package.json"), JSON.stringify({ scripts: { test: "node -e \"process.exit(0)\"" } }));
+    for (const [f, text] of Object.entries(files)) { const p = join(repo, f); await sh(repo, "mkdir", ["-p", p.slice(0, p.lastIndexOf("/"))]); writeFileSync(p, text); }
+    await sh(repo, "git", ["add", "-A"]);
+    await sh(repo, "git", ["-c", "user.email=gate@local", "-c", "user.name=gate", "commit", "-qm", "base"]);
+    return repo;
+  }
+  const baseFiles = {
+    "src/foo.ts": "export const f = 1;\n",
+    "src/foo.spec.ts": 'import { f } from "./foo.js";\nit("works", () => {});\n',
+    "src/bar.test.tsx": 'it("renders", () => {});\n',
+    "test.js": 'it("root", () => {});\n',
+  };
+  const td = (r: Awaited<ReturnType<typeof evaluateGate>>) => r.checks.find((c) => c.name === "tests-not-deleted")!;
+  it("fails when test.js is deleted", async () => {
+    const repo = await bareRepo(baseFiles);
+    await sh(repo, "git", ["rm", "-q", "test.js"]);
+    const r = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"] });
+    expect(td(r).passed).toBe(false); expect(td(r).detail).toContain("test.js"); expect(r.accepted).toBe(false);
+  });
+  it("fails when src/foo.spec.ts is deleted", async () => {
+    const repo = await bareRepo(baseFiles);
+    await sh(repo, "git", ["rm", "-q", "src/foo.spec.ts"]);
+    const r = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"] });
+    expect(td(r).passed).toBe(false); expect(td(r).detail).toContain("src/foo.spec.ts");
+  });
+  it("fails when an it() is removed from src/bar.test.tsx", async () => {
+    const repo = await bareRepo(baseFiles);
+    writeFileSync(join(repo, "src/bar.test.tsx"), "export const x = 1;\n");
+    const r = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"] });
+    expect(td(r).passed).toBe(false); expect(td(r).detail).toContain("src/bar.test.tsx");
+  });
+  it("fails when an it() is removed from test.js and from a spec file", async () => {
+    const repo = await bareRepo(baseFiles);
+    writeFileSync(join(repo, "test.js"), "const x = 1;\n");
+    writeFileSync(join(repo, "src/foo.spec.ts"), 'import { f } from "./foo.js";\n');
+    const r = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"] });
+    expect(td(r).passed).toBe(false); expect(td(r).detail).toContain("test.js"); expect(td(r).detail).toContain("src/foo.spec.ts");
+  });
+  it("passes when no test case is removed", async () => {
+    const repo = await bareRepo(baseFiles);
+    writeFileSync(join(repo, "src/foo.ts"), "export const f = 1;\nexport const g = 2;\n");
+    const r = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"] });
+    expect(td(r).passed).toBe(true);
+  });
 });
 
 describe("gate proofs", () => {
