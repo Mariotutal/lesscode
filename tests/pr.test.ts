@@ -100,7 +100,12 @@ describe("pull-request review caller", () => {
     const direct = await review({ checkout: dir, base: "base", intent, sparkClient: client, wonderClient: client });
 
     // Same review() result either way; the PR caller adds no pipeline.
-    expect(viaPr.result).toEqual(direct);
+    // LES-26: manifest timing differs per run; everything else identical.
+    const { manifest: _dm, summary: _ds, ...directRest } = direct;
+    const { manifest: _pm, summary: _ps, ...prRest } = viaPr.result;
+    void _dm; void _ds; void _pm; void _ps;
+    expect(prRest).toEqual(directRest);
+    expect(viaPr.result.manifest?.promptHashes).toEqual(direct.manifest?.promptHashes);
     expect(viaPr.declaration).toEqual({ baseRef: "base", intent });
     expect(state.wonderCalls).toBe(2); // one Wonder call per review() run
 
@@ -154,7 +159,12 @@ describe("pull-request review caller", () => {
     const viaPr = await runPrReview({ checkout: dir, sparkClient: client, wonderClient: client });
     const direct = await review({ checkout: dir, base: "base", intent, sparkClient: client, wonderClient: client });
 
-    expect(viaPr.result).toEqual(direct);
+    // LES-26: manifest timing differs per run; everything else identical.
+    const { manifest: _dm, summary: _ds, ...directRest } = direct;
+    const { manifest: _pm, summary: _ps, ...prRest } = viaPr.result;
+    void _dm; void _ds; void _pm; void _ps;
+    expect(prRest).toEqual(directRest);
+    expect(viaPr.result.manifest?.promptHashes).toEqual(direct.manifest?.promptHashes);
     expect(viaPr.declaration).toEqual({ baseRef: "base", intent });
 
     // Reviewed-only is a success: the note is the result, nothing applied.
@@ -174,7 +184,9 @@ describe("pull-request review caller", () => {
     // note-only run the gate is null, so the check fails even though
     // the note is a good review. The note cannot satisfy branch
     // protection; only a gate that ran and accepted can.
-    expect(viaPr).toEqual({ declaration: viaPr.declaration, result: direct, ...postFor(direct) });
+    const { manifest: _vm, summary: _vs, ...viaRest } = viaPr.result;
+    void _vm; void _vs;
+    expect({ declaration: viaPr.declaration, result: viaRest, check: viaPr.check, comment: viaPr.comment }).toEqual({ declaration: viaPr.declaration, result: directRest, ...postFor(direct) });
     expect(viaPr.check.body).toBe(JSON.stringify(direct.gate));
     expect(viaPr.check.body).toBe("null");
     expect(viaPr.check.conclusion).toBe("failure");

@@ -13,6 +13,7 @@ import { findTarget, parse } from "../classify/target.js";
 import type { Finding } from "../classify/schema.js";
 import { applyPlan } from "../plan/apply.js";
 import { planOnce, WONDER_MODEL, type AnyFinding } from "../plan/plan.js";
+import { ManifestBuilder, renderRunSummary, type RunManifest } from "../manifest.js";
 import type { PlannedEdit, ReviewNoteItem } from "../plan/schema.js";
 
 const exec = promisify(execFile);
@@ -49,6 +50,10 @@ export interface SimplifyResult {
   refusedConventions: { convention: string; file: string; citations: { file: string; startLine: number; endLine: number }[]; rationale: string }[];
   apply: { applied: unknown[]; skipped: { findingIndex: number; reason: string }[]; repairCalls: number };
   reasons: string[];
+  /** LES-26 run manifest: models, call count, usage, phase times, prompt hashes. No credential/prompt text. */
+  manifest: RunManifest;
+  /** Short human-readable rendering: findings/edits kept and dropped with reasons, verdict. */
+  summary: string;
 }
 
 async function git(repo: string, args: string[]): Promise<string> {
@@ -105,6 +110,7 @@ function restoreSnap(repo: string, snaps: Snapshot[]): void {
  */
 export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
   if (!opts.intent || opts.intent.length === 0) throw new Error("intent is required: the list of files the change claimed to touch");
+  const manifest = new ManifestBuilder();
   const checkout = opts.checkout;
   const relatedTests = opts.relatedTests?.length ? opts.relatedTests : ["tests"];
   const headSha = (await git(checkout, ["rev-parse", "HEAD"])).trim();
@@ -133,16 +139,24 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     // If the change itself still does not fit, classifyFindings
     // fails before the request with the size in the error.
     while (visible.length && !seeds.has(visible.at(-1)!) && !fits(visible, sparkModel)) visible = visible.slice(0, -1);
-    const classification = await classifyFindings({
+    const classification = await manifest.time("classify", () => classifyFindings({
       checkoutDir: scratch,
       files: visible,
       scopeCreep: { changedFiles: changed, intentFiles: opts.intent },
       client: opts.sparkClient,
-    });
+    }));
     const findings = classification.findings;
+    manifest.sparkModel = classification.model;
+    manifest.sparkCalls = classification.modelCalls;
+    manifest.promptHashes.push(...classification.promptHashes);
+    if (classification.usage) { manifest.usage.prompt_tokens += classification.usage.prompt_tokens; manifest.usage.completion_tokens += classification.usage.completion_tokens; manifest.usage.total_tokens += classification.usage.total_tokens; }
 
     const wonder = opts.wonderClient ?? createGuestClient({ env: { ...process.env, META_MODEL: WONDER_MODEL } });
-    const plan = await planOnce({ checkoutDir: scratch, findings, files: visible, changedFiles: changed, baseRef: opts.base, client: wonder });
+    const plan = await manifest.time("plan", () => planOnce({ checkoutDir: scratch, findings, files: visible, changedFiles: changed, baseRef: opts.base, client: wonder }));
+    manifest.wonderModel = plan.model;
+    manifest.wonderCalls = plan.modelCalls;
+    manifest.promptHashes.push(plan.promptHash);
+    if (plan.usage) { manifest.usage.prompt_tokens += plan.usage.prompt_tokens ?? 0; manifest.usage.completion_tokens += plan.usage.completion_tokens ?? 0; manifest.usage.total_tokens += plan.usage.total_tokens ?? ((plan.usage.prompt_tokens ?? 0) + (plan.usage.completion_tokens ?? 0)); }
     const planDropNotified = new Set<number>();
     // A finding the planner skipped (e.g. verification dropped the
     // broad helper finding before planning, so Wonder refuses it as
@@ -197,6 +211,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     const skippedAll: { findingIndex: number; reason: string }[] = [];
     let repairCalls = 0;
     let lastGate: GateResult | null = null;
+    const gateDropped: { label: string; reason: string }[] = [];
 
     for (const edit of edits) {
       const f = findings[edit.findingIndex]!;
@@ -206,7 +221,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
         ...edit.deleteFiles,
       ])];
       const before = snapshot(scratch, [...new Set([...touchedGuess, ...keptEditSet])]);
-      const apply = await applyPlan({ checkoutDir: scratch, baseRef: opts.base, findings, edits: [edit], client: wonder });
+      const apply = await manifest.time("apply", () => applyPlan({ checkoutDir: scratch, baseRef: opts.base, findings, edits: [edit], client: wonder }));
       repairCalls += apply.repairCalls;
       skippedAll.push(...apply.skipped);
       if (!apply.applied.length) {
@@ -231,7 +246,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
       // Split gate: cheap local checks run per edit (they gate keeping
       // this edit); the repository's test/typecheck/lint commands run
       // once on the cumulative kept edits after the loop, not per edit.
-      const gate = await evaluateCheapGate({ repoDir: scratch, baseRef: headSha, editSet: candidateSet, relatedTests, coverageExempt: candidateSet.filter((f) => restoreFiles.has(f)), targetSymbols: await gateTargets(scratch, headSha, candidateSet, findings) });
+      const gate = await manifest.time("gate", async () => evaluateCheapGate({ repoDir: scratch, baseRef: headSha, editSet: candidateSet, relatedTests, coverageExempt: candidateSet.filter((f) => restoreFiles.has(f)), targetSymbols: await gateTargets(scratch, headSha, candidateSet, findings) }));
       lastGate = gate;
       // A lone scope-creep restore shrinks nothing by itself; keep it
       // when every non-size check passes. The final cumulative gate
@@ -245,11 +260,29 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
         restoreSnap(scratch, before);
         const failed = gate.checks.filter((c) => !c.passed);
         reasons.push(`finding ${edit.findingIndex} (${edit.action}) dropped: gate rejected (${failed.map((c) => c.name).join(", ")})`);
+        gateDropped.push({ label: `finding ${edit.findingIndex}: ${edit.action}`, reason: `gate rejected (${failed.map((c) => `${c.name} — ${c.detail}`).join("; ")})` });
         opts.onGateRejected?.(edit.findingIndex, `the gate rejected the edit for finding ${edit.findingIndex}: ${failed.map((c) => `${c.name} — ${c.detail}`).join("; ")}`);
       }
     }
 
     const planSummary = { edits: plan.edits.length, skipped: plan.skipped, model: plan.model, modelCalls: plan.modelCalls, usage: plan.usage, review: plan.review };
+    const finish = (partial: Omit<SimplifyResult, "manifest" | "summary">): SimplifyResult => {
+      const built = manifest.build();
+      const label = (f: AnyFinding) => `${f.category} in ${f.file}`;
+      const summary = renderRunSummary({
+        verdict: partial.verdict,
+        findingsKept: findings.map((f) => ({ label: label(f) })),
+        findingsDropped: [
+          ...classification.verificationDropped.map((d) => ({ label: label(d.finding), reason: d.reason })),
+          ...classification.dropped.filter((f) => !classification.verificationDropped.some((d) => d.finding === f)).map((f) => ({ label: label(f as AnyFinding), reason: "cited lines do not exist in the checkout (evidence check)" })),
+          ...classification.refusedConventions.map((d) => ({ label: label(d.finding), reason: d.status === "refused" ? d.reason : d.finding.rationale })),
+        ],
+        editsKept: (appliedAll as { findingIndex: number; action: string }[]).map((a) => ({ label: `finding ${a.findingIndex}: ${a.action}` })),
+        editsDropped: [...gateDropped, ...[...plan.skipped, ...skippedAll].map((s) => ({ label: `finding ${s.findingIndex}`, reason: s.reason }))],
+        manifest: built,
+      });
+      return { ...partial, manifest: built, summary };
+    };
     const applySummary = { applied: appliedAll, skipped: [...plan.skipped, ...skippedAll], repairCalls };
     const refusedConventions = classification.refusedConventions.map((d) => ({
       convention: d.finding.convention ?? "(none)",
@@ -259,7 +292,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     }));
 
     if (!appliedAll.length) {
-      return { verdict: "refused", patch: "", findings, gate: lastGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, unknownConventions: classification.unknownConventions, refusedConventions, reasons };
+      return finish({ verdict: "refused", patch: "", findings, gate: lastGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, unknownConventions: classification.unknownConventions, refusedConventions, reasons });
     }
 
     const finalEditSet = [...new Set(keptEditSet)];
@@ -267,8 +300,8 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     // the repository's command checks — run once here, in parallel
     // (inside runCommandChecks), on the cumulative kept edits. The
     // merged result is the same combined verdict a full gate gave.
-    const finalCheap = await evaluateCheapGate({ repoDir: scratch, baseRef: headSha, editSet: finalEditSet, relatedTests, coverageExempt: finalEditSet.filter((f) => restoreFiles.has(f)), targetSymbols: await gateTargets(scratch, headSha, finalEditSet, findings) });
-    const commandGate = await evaluateCommandGate({ repoDir: scratch, baseRef: headSha, editSet: finalEditSet, relatedTests });
+    const finalCheap = await manifest.time("gate", async () => evaluateCheapGate({ repoDir: scratch, baseRef: headSha, editSet: finalEditSet, relatedTests, coverageExempt: finalEditSet.filter((f) => restoreFiles.has(f)), targetSymbols: await gateTargets(scratch, headSha, finalEditSet, findings) }));
+    const commandGate = await manifest.time("gate", () => evaluateCommandGate({ repoDir: scratch, baseRef: headSha, editSet: finalEditSet, relatedTests }));
     const finalGate: GateResult = {
       accepted: finalCheap.accepted && commandGate.accepted,
       checks: [...finalCheap.checks, ...commandGate.checks],
@@ -278,14 +311,14 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
       ...(commandGate.baseline ? { baseline: commandGate.baseline } : {}),
     };
     if (!finalGate.accepted) {
-      return {
+      return finish({
         verdict: "refused", patch: "", findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, unknownConventions: classification.unknownConventions, refusedConventions,
         reasons: [...reasons, `final gate rejected: ${finalGate.checks.filter((c) => !c.passed).map((c) => c.name).join(", ")}`],
-      };
+      });
     }
 
     const patch = await git(scratch, ["-c", "color.ui=false", "diff", "--no-color", headSha, "--", "."]);
-    return { verdict: "accepted", patch, findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, unknownConventions: classification.unknownConventions, refusedConventions, reasons };
+    return finish({ verdict: "accepted", patch, findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, unknownConventions: classification.unknownConventions, refusedConventions, reasons });
   } finally {
     await exec("git", ["worktree", "remove", "--force", scratch], { cwd: checkout }).catch(() => undefined);
     await exec("git", ["worktree", "prune"], { cwd: checkout }).catch(() => undefined);
