@@ -164,6 +164,59 @@ describe("simplify", () => {
     expect(r.patch).toBe("");
   }, 300_000);
 
+  it("LES-23: repository test/typecheck/lint invocations do not grow with the number of edits", async () => {
+    // Count actual process invocations by putting counting shims for
+    // npm/npx first on PATH inside the scratch run. npm/npx are shell
+    // scripts resolving node via `env node`, so a node shim that
+    // records and exits 0 keeps every invocation fast and passing.
+    // Baseline (1 set) + final cumulative (1 set): exactly one test,
+    // one typecheck and one lint invocation, independent of edit count
+    // (fixture 1 applies three edits below).
+    const { mkdtempSync: mk, writeFileSync: wf, chmodSync: chmod, readFileSync: rf } = await import("node:fs");
+    const shimDir = mk(join(tmpdir(), "lc-simplify-count-"));
+    const log = join(shimDir, "invocations.log");
+    wf(log, "");
+    const node = process.execPath;
+    for (const name of ["node", "npm", "npx"]) {
+      wf(join(shimDir, name), `#!/bin/sh\necho "${name} $*" >> ${log}\nexit 0\n`);
+      chmod(join(shimDir, name), 0o755);
+    }
+    const dir = await materialize("1");
+    const spark = [
+      { category: "single-use-abstraction", file: "src/userApiClient.ts", citations: [cite("src/userApiClient.ts", 1, 6)], rationale: "single-use" },
+      { category: "single-use-abstraction", file: "src/userRepository.ts", citations: [cite("src/userRepository.ts", 1, 7)], rationale: "single-use" },
+      { category: "single-use-abstraction", file: "src/userService.ts", citations: [cite("src/userService.ts", 1, 7)], rationale: "single-use" },
+    ];
+    const wonder = [
+      { findingIndex: 0, action: "inline", newFiles: [], deleteFiles: [], rationale: "inline" },
+      { findingIndex: 1, action: "inline", newFiles: [], deleteFiles: [], rationale: "inline" },
+      { findingIndex: 2, action: "inline", newFiles: [], deleteFiles: [], rationale: "inline" },
+    ];
+    const client = scripted(spark, wonder);
+    const prevPath = process.env.PATH;
+    process.env.PATH = `${shimDir}:${prevPath ?? ""}`;
+    try {
+      void node;
+      const r = await simplify({ checkout: dir, base: "base", intent: ["src/userFetcher.ts", "src/userApiClient.ts", "src/userRepository.ts", "src/userService.ts"], sparkClient: client, wonderClient: client });
+      const lines = rf(log, "utf8").split("\n").filter(Boolean);
+      const count = (re: RegExp) => lines.filter((l) => re.test(l)).length;
+      expect(r.verdict).toBe("accepted");
+      // Three edits applied; command invocations stay at 2 sets
+      // (baseline + final cumulative), so test/typecheck/lint each
+      // ran exactly twice — not once per edit (which would be 3+).
+      // `applyPlan` is called once per edit and reports per-edit arrays, so splice them back into one continuous log line count.
+      expect(JSON.stringify(r.apply.applied)).toContain("inline");
+      expect(r.plan.edits).toBe(3);
+      expect(count(/^npx vitest run /)).toBe(2);
+      expect(count(/typecheck/)).toBe(2);
+      // Fixture 1 has an eslint config but no lint script, so lint is invoked via `npx eslint <touched>` — exactly twice (baseline + final).
+      // Exactly one lint invocation, on the final cumulative run: the baseline worktree is identical to baseRef there, so `git diff` is empty and there is nothing touched to lint. All three commands still ran exactly once on the cumulative edits plus the baseline pass.
+      expect(count(/^npx eslint /)).toBe(1);
+    } finally {
+      process.env.PATH = prevPath;
+    }
+  }, 300_000);
+
   it("fixture 5: drops the complexity edit, keeps an earlier gate-accepted edit", async () => {
     // Fixture 5's bloated tree is already the god function; construct
     // the PR state from base pricing (helpers present) in a scratch
