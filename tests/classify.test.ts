@@ -229,6 +229,16 @@ describe("LES-19 scoped review files", () => {
     const js = checkout({ "src/main.js": "export const m = 1;\n", "src/other.js": "export const o = 1;\n", "tsconfig.json": JSON.stringify({ compilerOptions: { allowJs: false } }) });
     expect(scopedReviewFiles(js, { intentFiles: ["src/main.js"] })).toEqual(["src/main.js"]);
   });
+  it("LES-31: scoped review sees a root test.js that require()s the change, and not bare require targets", () => {
+    const dir = checkout({
+      "src/use.ts": "export const u = 1;\n",
+      "test.js": 'const { u } = require("./src/use.js");\n',
+      "other.js": 'const x = require("./src/use.js");\n',
+      "tsconfig.json": JSON.stringify({ compilerOptions: { allowJs: true } }),
+    });
+    const files = scopedReviewFiles(dir, { intentFiles: ["src/use.ts"] });
+    expect(files).toContain("test.js");
+  });
   it("fails before the request when the scoped prompt exceeds the window", async () => {
     const dir = checkout({ "src/big.ts": `export const x = "${"x".repeat(20000)}";\n` });
     process.env.LESSCODE_CONTEXT_WINDOW = "100";
