@@ -86,6 +86,11 @@ export const CONVENTION_REGISTRY_FILE = "lesscode-conventions.json";
  * note instead (project description: "A practice is applied only
  * when the repository has it written in the convention registry.").
  */
+export function unknownConventionNames(names: readonly string[]): string[] {
+  const known = new Set(CONVENTIONS.map((c) => c.name));
+  return [...new Set(names.filter((n) => !known.has(n)))].sort();
+}
+
 export function loadRepositoryConventions(checkoutDir: string): string[] {
   const path = join(checkoutDir, CONVENTION_REGISTRY_FILE);
   if (!existsSync(path)) return [];

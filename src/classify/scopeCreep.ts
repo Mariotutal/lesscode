@@ -1,3 +1,4 @@
+import { isNonBehaviourPath, matchesIntent } from "./checkout.js";
 import type { Citation, Finding } from "./schema.js";
 
 /**
@@ -29,11 +30,16 @@ export interface ScopeCreepInput {
   lineCount?: (file: string) => number;
 }
 
+/** Changed paths kept (not restored) because they cannot change behaviour, with why. */
+export function exemptScopeCreep(input: ScopeCreepInput): { file: string; reason: string }[] {
+  return [...input.changedFiles].sort().filter((f) => !matchesIntent(f, input.intentFiles) && isNonBehaviourPath(f))
+    .map((file) => ({ file, reason: `${file} is outside the PR intent but kept: documentation/lockfile paths cannot change behaviour, so it is exempt from restoration` }));
+}
+
 export function decideScopeCreep(input: ScopeCreepInput): ScopeCreepFinding[] {
-  const intent = new Set(input.intentFiles);
   const out: ScopeCreepFinding[] = [];
   for (const file of [...input.changedFiles].sort()) {
-    if (intent.has(file)) continue;
+    if (matchesIntent(file, input.intentFiles) || isNonBehaviourPath(file)) continue;
     const citation: Citation = {
       file,
       startLine: 1,

@@ -3,13 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { classifyFindings } from "../src/classify/classify.js";
-import { scopedReviewFiles } from "../src/classify/checkout.js";
+import { changedFilesFromGit, matchesIntent, readTsConfig, scopedReviewFiles } from "../src/classify/checkout.js";
 import type { GuestClient } from "../src/classify/client.js";
 import { filterByEvidence, citationExists, isSealedPath } from "../src/classify/evidence.js";
 import { decideScopeCreep } from "../src/classify/scopeCreep.js";
 import { classifiedOutputSchema, type Finding } from "../src/classify/schema.js";
 import { applyConventionFix, decideConventionBreak } from "../src/classify/conventionBreak.js";
-import { CONVENTIONS } from "../src/classify/conventions.js";
+import { CONVENTIONS, unknownConventionNames } from "../src/classify/conventions.js";
 
 function checkout(files: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "lc-cls-"));
@@ -276,6 +276,45 @@ describe("scope creep (code-decided)", () => {
       },
     });
     expect(r.findings.map((f) => f.file).sort()).toEqual(["src/logger.ts", "src/styles/footerStyle.ts"]);
+  });
+});
+
+describe("LES-25 intent and repository reading", () => {
+  it("intent names directories and globs as well as files", () => {
+    const changed = ["src/app.ts", "src/ui/Button.ts", "src/ui/deep/Card.ts", "src/gen/a.gen.ts", "docs/x.md"];
+    expect(decideScopeCreep({ changedFiles: changed, intentFiles: ["src/ui", "src/gen/*.gen.ts", "src/app.ts"] }).map((f) => f.file)).toEqual([]);
+    expect(decideScopeCreep({ changedFiles: changed, intentFiles: ["src/ui/**"] }).map((f) => f.file)).toEqual(["src/app.ts", "src/gen/a.gen.ts"]);
+    expect(matchesIntent("src/ui/deep/Card.ts", ["src/ui"])).toBe(true);
+  });
+  it("README/lockfile extras are exempt from restoration, source outside intent is not", () => {
+    const out = decideScopeCreep({ changedFiles: ["README.md", "package-lock.json", "src/extra.ts"], intentFiles: ["src/a.ts"] });
+    expect(out.map((f) => f.file)).toEqual(["src/extra.ts"]);
+  });
+  it("untracked files are not part of the PR, and a commented tsconfig reads as written", async () => {
+    const dir = checkout({
+      "src/a.ts": "export const a = 1;\n",
+      "tsconfig.json": "{\n  // repo settings\n  \"compilerOptions\": { \"allowJs\": true, /* keep */ \"checkJs\": true }\n}\n",
+    });
+    const { execFile } = await import("node:child_process"); const { promisify } = await import("node:util"); const ex = promisify(execFile);
+    await ex("git", ["init", "-q", "-b", "base"], { cwd: dir }); await ex("git", ["add", "-A"], { cwd: dir });
+    await ex("git", ["-c", "user.email=t@l", "-c", "user.name=t", "commit", "-qm", "base"], { cwd: dir });
+    writeFileSync(join(dir, "src/a.ts"), "export const a = 2;\n"); writeFileSync(join(dir, "scratch.ts"), "export const s = 1;\n");
+    expect(await changedFilesFromGit(dir, "base")).toEqual(["src/a.ts"]);
+    expect(readTsConfig(dir)).toEqual({ allowJs: true, checkJs: true });
+  });
+  it("unknown convention names are reported, not silently ignored", () => {
+    expect(unknownConventionNames(["no-console-log", "made-up-practice"])).toEqual(["made-up-practice"]);
+  });
+  it("a file that only imports a type from the change is not in the scoped note files", () => {
+    const dir = checkout({
+      "src/change.ts": "export interface Ctx { x: number }\nexport const c: Ctx = { x: 1 };\n",
+      "src/typeOnly.ts": 'import type { Ctx } from "./change.js";\nexport const t: Ctx = { x: 2 };\n',
+      "src/value.ts": 'import { c } from "./change.js";\nexport const v = c.x;\n',
+      "tsconfig.json": JSON.stringify({ compilerOptions: { allowJs: true } }),
+    });
+    const files = scopedReviewFiles(dir, { intentFiles: ["src/change.ts"] });
+    expect(files).not.toContain("src/typeOnly.ts");
+    expect(files).toContain("src/value.ts");
   });
 });
 

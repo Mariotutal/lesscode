@@ -1,5 +1,5 @@
 import { createGuestClient, type GuestClient, type ToolDefinition } from "./client.js";
-import { CONVENTIONS, loadRepositoryConventions } from "./conventions.js";
+import { CONVENTIONS, loadRepositoryConventions, unknownConventionNames } from "./conventions.js";
 import { assertFitsWindow, readCheckoutSources, type CheckoutSource } from "./checkout.js";
 import { citationExists, filterByEvidence, isSealedPath } from "./evidence.js";
 import { decideConventionBreak, type ConventionDecision } from "./conventionBreak.js";
@@ -9,7 +9,7 @@ import {
   type ClassifiedOutput,
   type Finding,
 } from "./schema.js";
-import { decideScopeCreep, type ScopeCreepFinding } from "./scopeCreep.js";
+import { decideScopeCreep, exemptScopeCreep, type ScopeCreepFinding } from "./scopeCreep.js";
 import { verifyFindings, type VerificationDrop } from "./verify.js";
 
 export const REPORT_TOOL = "report_findings";
@@ -85,6 +85,10 @@ export interface ClassifyResult {
   verificationDropped: VerificationDrop[];
   /** Convention names this repository wrote in lesscode-conventions.json. */
   registry: string[];
+  /** Registry names code does not know, reported instead of silently ignored. */
+  unknownConventions: string[];
+  /** Changed non-behaviour paths kept instead of restored, with why. */
+  scopeExemptions: { file: string; reason: string }[];
   refusedConventions: ConventionDecision[];
   /** Raw model output(s) as parsed JSON (pre-filter), for audit. */
   rawOutputs: unknown[];
@@ -216,6 +220,7 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
   // when the repository wrote the practice down in its registry;
   // otherwise the finding is refused (the review note may still carry it).
   const registry = loadRepositoryConventions(opts.checkoutDir);
+  const unknownConventions = unknownConventionNames(registry);
   const conventionFindings = kept.filter((f) => f.category === "convention-break");
   const decisions = decideConventionBreak(opts.checkoutDir, conventionFindings, registry);
   const refusedConventions = decisions.filter((d) => d.status === "refused");
@@ -241,6 +246,8 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
     dropped,
     verificationDropped: verification.dropped,
     registry,
+    unknownConventions,
+    scopeExemptions: opts.scopeCreep ? exemptScopeCreep(opts.scopeCreep) : [],
     refusedConventions,
     rawOutputs,
     model: client.config.model,
