@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -8,7 +8,7 @@ import type { GuestClient } from "../src/classify/client.js";
 import { filterByEvidence, citationExists, isSealedPath } from "../src/classify/evidence.js";
 import { decideScopeCreep } from "../src/classify/scopeCreep.js";
 import { classifiedOutputSchema, type Finding } from "../src/classify/schema.js";
-import { decideConventionBreak } from "../src/classify/conventionBreak.js";
+import { applyConventionFix, decideConventionBreak } from "../src/classify/conventionBreak.js";
 import { CONVENTIONS } from "../src/classify/conventions.js";
 
 function checkout(files: Record<string, string>): string {
@@ -378,5 +378,43 @@ describe("convention registry", () => {
       },
     ]);
     expect(d[0]!.status).toBe("refused");
+  });
+
+  const finding = (convention: string, file = "src/a.ts") => ({
+    category: "convention-break" as const,
+    file,
+    convention,
+    citations: [{ file, startLine: 1, endLine: 1 }],
+    rationale: "claimed",
+  });
+
+  it("applyConventionFix refuses an unregistered practice even when called directly", () => {
+    const dir = checkout({ "src/a.ts": "export function f(): void {\n  console.log('x');\n}\n" });
+    expect(applyConventionFix(dir, finding("no-console-log"))).toBeUndefined();
+    // ...and applies it once the repository registry names it.
+    writeFileSync(join(dir, "lesscode-conventions.json"), JSON.stringify({ conventions: ["no-console-log"] }));
+    expect(applyConventionFix(dir, { ...finding("no-console-log"), citations: [{ file: "src/a.ts", startLine: 2, endLine: 2 }] })).not.toContain("console.log");
+  });
+
+  it("no raw text rewrite of quotes or semicolons produces an edit, even when registered", () => {
+    const dir = checkout({
+      "src/a.ts": 'export const s = "hi"\n',
+      "lesscode-conventions.json": JSON.stringify({ conventions: ["semicolons", "single-quotes"] }),
+    });
+    expect(applyConventionFix(dir, finding("semicolons"))).toBeUndefined();
+    expect(applyConventionFix(dir, finding("single-quotes"))).toBeUndefined();
+    expect(decideConventionBreak(dir, [finding("semicolons")], ["semicolons"])[0]!.status).toBe("refused");
+  });
+
+  it("registered semicolons/single-quotes are applied by ESLint fix when the repo config enables the rule", () => {
+    const dir = checkout({
+      "src/a.ts": 'export const s = "hi"\n',
+      "lesscode-conventions.json": JSON.stringify({ conventions: ["semicolons", "single-quotes"] }),
+      "eslint.config.mjs": 'export default [{ files: ["**/*.ts"], rules: { semi: ["error", "always"], quotes: ["error", "single"] } }];\n',
+    });
+    expect(applyConventionFix(dir, finding("semicolons"))).toBe("export const s = 'hi';\n");
+    expect(decideConventionBreak(dir, [finding("semicolons")], ["semicolons"])[0]!.status).toBe("fixable");
+    // eslint fix ran on a copy-restore basis: the file on disk is untouched.
+    expect(readFileSync(join(dir, "src/a.ts"), "utf8")).toBe('export const s = "hi"\n');
   });
 });
