@@ -20,6 +20,7 @@ if (!repo || !base || intent.length === 0) {
 try {
   const result = await simplify({ checkout: repo, base, intent, relatedTests: list("tests") });
   console.log(JSON.stringify(result, null, 2));
+  console.log(result.summary);
   process.exit(result.verdict === "accepted" ? 0 : 1);
 } catch (e) {
   console.error(e instanceof Error ? e.message : String(e));
