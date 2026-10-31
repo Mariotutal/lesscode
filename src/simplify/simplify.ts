@@ -9,6 +9,8 @@ import { classifyFindings } from "../classify/classify.js";
 import { createGuestClient } from "../classify/client.js";
 import { isSealedPath } from "../classify/evidence.js";
 import { evaluateGate, type GateResult } from "../gate/gate.js";
+import { findTarget, parse } from "../classify/target.js";
+import type { Finding } from "../classify/schema.js";
 import { applyPlan } from "../plan/apply.js";
 import { planOnce, WONDER_MODEL, type AnyFinding } from "../plan/plan.js";
 import type { PlannedEdit, ReviewNoteItem } from "../plan/schema.js";
@@ -59,6 +61,25 @@ function isTestPath(f: string): boolean {
 
 /** Public: gate-rejection hook used by review to rewrite the note. */
 export type GateRejectedHook = (findingIndex: number, reason: string) => void;
+
+/** Code-verified targeted symbol per edited file: citations index the
+ * BASE tree, so resolve them against `git show <baseRef>:<file>`, never
+ * the post-edit scratch contents. */
+async function gateTargets(scratch: string, baseRef: string, editSet: string[], findings: readonly AnyFinding[]): Promise<{ file: string; name: string }[]> {
+  const out: { file: string; name: string }[] = [];
+  for (const f of findings) {
+    if (!("citations" in f) || !editSet.includes(f.file)) continue;
+    const base = await gitShowFile(scratch, baseRef, f.file);
+    if (base === null) continue;
+    const t = findTarget(parse(f.file, base), f.file, f as Finding);
+    if (t) out.push({ file: f.file, name: t.name });
+  }
+  return out;
+}
+
+async function gitShowFile(repo: string, ref: string, file: string): Promise<string | null> {
+  try { const { stdout } = await exec("git", ["show", `${ref}:${file}`], { cwd: repo, maxBuffer: 64 * 1024 * 1024 }); return stdout; } catch { return null; }
+}
 
 interface Snapshot { file: string; content: string | null }
 function snapshot(repo: string, files: string[]): Snapshot[] {
@@ -197,7 +218,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
       }
 
       const candidateSet = [...new Set([...keptEditSet, ...apply.editSet])];
-      const gate = await evaluateGate({ repoDir: scratch, baseRef: headSha, editSet: candidateSet, relatedTests, coverageExempt: candidateSet.filter((f) => restoreFiles.has(f)) });
+      const gate = await evaluateGate({ repoDir: scratch, baseRef: headSha, editSet: candidateSet, relatedTests, coverageExempt: candidateSet.filter((f) => restoreFiles.has(f)), targetSymbols: await gateTargets(scratch, headSha, candidateSet, findings) });
       lastGate = gate;
       // A lone scope-creep restore shrinks nothing by itself; keep it
       // when every non-size check passes. The final cumulative gate
@@ -229,7 +250,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     }
 
     const finalEditSet = [...new Set(keptEditSet)];
-    const finalGate = await evaluateGate({ repoDir: scratch, baseRef: headSha, editSet: finalEditSet, relatedTests, coverageExempt: finalEditSet.filter((f) => restoreFiles.has(f)) });
+    const finalGate = await evaluateGate({ repoDir: scratch, baseRef: headSha, editSet: finalEditSet, relatedTests, coverageExempt: finalEditSet.filter((f) => restoreFiles.has(f)), targetSymbols: await gateTargets(scratch, headSha, finalEditSet, findings) });
     if (!finalGate.accepted) {
       return {
         verdict: "refused", patch: "", findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, refusedConventions,

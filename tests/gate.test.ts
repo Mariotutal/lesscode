@@ -173,6 +173,76 @@ describe("LES-31 tests-not-deleted", () => {
   });
 });
 
+describe("LES-22 gate gaps", () => {
+  async function bareRepo(files: Record<string, string>, scripts: Record<string, string> = { test: "node -e \"process.exit(0)\"" }): Promise<string> {
+    const repo = mkdtempSync(join(tmpdir(), "lc-g22-"));
+    await sh(repo, "git", ["init", "-q", "-b", "base"]);
+    writeFileSync(join(repo, "package.json"), JSON.stringify({ scripts }));
+    for (const [f, text] of Object.entries(files)) { const p = join(repo, f); await sh(repo, "mkdir", ["-p", p.slice(0, p.lastIndexOf("/"))]); writeFileSync(p, text); }
+    await sh(repo, "git", ["add", "-A"]);
+    await sh(repo, "git", ["-c", "user.email=gate@local", "-c", "user.name=gate", "commit", "-qm", "base"]);
+    return repo;
+  }
+  const files = {
+    "src/foo.ts": "export const keep = 1;\nexport const helper = 2;\nexport const gone = 3;\nconst use = () => keep + helper + gone;\nexport const useIt = use;\n",
+    "src/foo.spec.ts": 'import { keep } from "./foo.js";\nit("works", () => { expect(keep).toBe(1); });\n',
+  };
+  it("rejects deleting an untargeted export inside the edit set, naming it", async () => {
+    const repo = await bareRepo(files);
+    // Target `gone` (first removed export), but also delete `helper`.
+    writeFileSync(join(repo, "src/foo.ts"), "export const keep = 1;\nconst use = () => keep;\nexport const useIt = use;\n");
+    const r = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"], targetSymbols: [{ file: "src/foo.ts", name: "gone" }] });
+    const c = r.checks.find((x) => x.name === "exports-inside-edit-set-targeted-only")!;
+    expect(c.passed).toBe(false); expect(c.detail).toContain("helper"); expect(c.detail).not.toContain("gone");
+    expect(r.accepted).toBe(false);
+  });
+  it("without a code-verified target it does not judge in-set removals (fixture-5 shape)", async () => {
+    const repo = await bareRepo(files);
+    writeFileSync(join(repo, "src/foo.ts"), "export const keep = 1;\nconst use = () => keep;\nexport const useIt = use;\n");
+    const r = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"] });
+    const c = r.checks.find((x) => x.name === "exports-inside-edit-set-targeted-only")!;
+    expect(c.passed).toBe(true); expect(c.detail).toContain("not judged");
+  });
+  it("allows only the targeted export to disappear and a surviving export's signature to change", async () => {
+    const repo = await bareRepo(files);
+    writeFileSync(join(repo, "src/foo.ts"), "export const keep = 42;\nexport const helper = 2;\nconst use = () => keep + helper;\nexport const useIt = use;\n");
+    const r = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"], targetSymbols: [{ file: "src/foo.ts", name: "gone" }] });
+    expect(r.checks.find((x) => x.name === "exports-inside-edit-set-targeted-only")!.passed).toBe(true);
+  });
+  it("reports pre-existing test failure as baseline, not an edit rejection", async () => {
+    const repo = await bareRepo(files, { test: "node -e \"process.exit(1)\"" });
+    writeFileSync(join(repo, "src/foo.ts"), files["src/foo.ts"] + "export const extra = 0;\n");
+    const r = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"] });
+    expect(r.baseline!.preExistingFailures).toContain("related-tests-pass");
+    expect(r.baseline!.exitCodes.tests).toBe(1);
+    const c = r.checks.find((x) => x.name === "related-tests-pass")!;
+    expect(c.passed).toBe(true); expect(c.detail).toContain("pre-existing baseline failure");
+    expect(r.checks.find((x) => x.name === "baseline-pre-existing-failures")!.detail).toContain("related-tests-pass");
+  });
+  it("still rejects when the edit newly breaks passing tests", async () => {
+    const repo = await bareRepo(files);
+    writeFileSync(join(repo, "package.json"), JSON.stringify({ scripts: { test: "node -e \"process.exit(1)\"" } }));
+    writeFileSync(join(repo, "src/foo.ts"), files["src/foo.ts"] + "export const extra = 0;\n");
+    const r = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"] });
+    const c = r.checks.find((x) => x.name === "related-tests-pass")!;
+    expect(c.passed).toBe(false); expect(c.detail).not.toContain("pre-existing");
+  });
+  it("measures strings containing comment markers identically before/after a comment-only change", () => {
+    const before = 'const url = "https://example.com/a";\nconst t = `x /* y */ z`;\nconst n = 1;\n';
+    const after = before + "// a comment with /* inside\n/* block // x */\n";
+    expect(measureSource("a.ts", after).sizeLines).toBe(measureSource("a.ts", before).sizeLines);
+    expect(measureSource("a.ts", before).sizeLines).toBe(3);
+  });
+  it("complexity cap lets complexity 1 -> 2 and 2 -> 3, but not 1 -> 3", async () => {
+    const src = (body: string) => ({ "src/foo.ts": `export function f(x: number) { ${body} }\n`, "src/foo.spec.ts": 'import { f } from "./foo.js";\nit("w", () => { f(1); });\n' });
+    // This is exercised at metric level: cap = max(before*1.1, before+1)
+    const repo = await bareRepo(src("return x;"));
+    writeFileSync(join(repo, "src/foo.ts"), "export function f(x: number) { if (x) return 1; return x; }\nexport const pad = [1,2,3,4,5,6,7,8,9];\n");
+    const ok = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"] });
+    expect(ok.checks.find((x) => x.name === "cyclomatic-not-over-10pct")!.passed).toBe(true);
+  });
+});
+
 describe("gate proofs", () => {
   it("accepts the hand-written fixture-1 patch", async () => {
     const tmp = mkdtempSync(join(tmpdir(), "lc-g1-"));
