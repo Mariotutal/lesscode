@@ -15,8 +15,9 @@ export interface PipelineResult {
 }
 
 /**
- * Full run: Spark classifies, Wonder plans ONCE, code applies
- * (one tsc-repair turn per failing edit, then skip), the gate decides.
+ * Full run: Spark classifies, Wonder plans ONCE, code applies edits
+ * as AST codemods (no repair turn; a non-mechanical edit is skipped),
+ * and the gate decides.
  * The gate's base is the PR branch itself: the simplification must
  * shrink the bloated tree relative to bloated-pr, with exports outside
  * the applied edit set unchanged.
