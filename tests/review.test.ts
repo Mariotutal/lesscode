@@ -197,6 +197,31 @@ describe("review", () => {
     expect(state.wonderCalls).toBe(1);
   }, 300_000);
 
+  it("LES-25: README-only extra is kept with a reason, source creep is restored, untracked ignored, note cites the changed line", async () => {
+    const dir = await materialize("7");
+    // Extra paths on the PR: README + a source file outside intent, plus an untracked local file.
+    writeFileSync(join(dir, "README.md"), "# changed readme\n");
+    writeFileSync(join(dir, "src/extra.ts"), "export const extra = 1;\n");
+    await sh(dir, "git", ["add", "README.md", "src/extra.ts"]);
+    await sh(dir, "git", ["-c", "user.email=t@l", "-c", "user.name=t", "commit", "-qm", "extras"]);
+    writeFileSync(join(dir, "local-scratch.ts"), "export const scratch = 1;\n"); // untracked, never committed
+    const changedReport = readFileSync(join(dir, "src/report.ts"), "utf8");
+    const { client } = scripted([], [
+      { findingIndex: 0, action: "restore-from-base", newFiles: [], deleteFiles: [], rationale: "restore creep" },
+    ], [
+      { kind: "boundary", text: "About unchanged context above the change.", citations: [cite("src/report.ts", 1, 2)] },
+      { kind: "boundary", text: "The new renderReceipt duplicates the invoice formatting on the changed lines.", citations: [cite("src/report.ts", 5, 10)] },
+    ]);
+    const r = await review({ checkout: dir, base: "base", intent: ["src/report.ts"], sparkClient: client, wonderClient: client });
+    expect(r.review.items.map((i) => i.text)).toEqual(["The new renderReceipt duplicates the invoice formatting on the changed lines."]);
+    expect(r.detail.reasons.some((x) => /README\.md.*cannot change behaviour/.test(x)), r.detail.reasons.join("\n")).toBe(true);
+    expect(r.findings.some((f) => f.category === "scope-creep" && f.file === "src/extra.ts")).toBe(true);
+    expect(r.findings.some((f) => f.file === "README.md" || f.file === "local-scratch.ts")).toBe(false);
+    expect(r.applied, r.detail.reasons.join("\n")).toContain("src/extra.ts"); // restored (deleted vs head)
+    expect(r.applied).not.toContain("README.md");
+    void changedReport;
+  }, 300_000);
+
   it("failed only when the run itself cannot finish", async () => {
     const r = await review({ checkout: root, base: "base", intent: [] });
     expect(r.verdict).toBe("failed");

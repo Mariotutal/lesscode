@@ -1,6 +1,6 @@
 import type { GuestClient } from "../classify/client.js";
 import { citationExists } from "../classify/evidence.js";
-import { changedFilesFromGit, readTsConfig, scopedReviewFiles } from "../classify/checkout.js";
+import { changedFilesFromGit, changedLinesFromGit, matchesIntent, readTsConfig, scopedReviewFiles } from "../classify/checkout.js";
 import type { GateResult } from "../gate/gate.js";
 import type { AnyFinding } from "../plan/plan.js";
 import type { ReviewNoteItem } from "../plan/schema.js";
@@ -41,6 +41,7 @@ export interface ReviewResult {
     reasons: string[];
     droppedFindings: number;
     registry: string[];
+    unknownConventions: string[];
     tsConfig: { allowJs: boolean; checkJs: boolean };
     error?: string;
   };
@@ -89,15 +90,33 @@ export async function review(opts: ReviewOptions): Promise<ReviewResult> {
     // scoped (visible) set is dropped even when the line exists.
     const changed = await changedFilesFromGit(opts.checkout, opts.base).catch(() => []);
     const visible = new Set(scopedReviewFiles(opts.checkout, { intentFiles: opts.intent, changedFiles: changed, relatedTests: opts.relatedTests }));
+    // The note is about the change: items must cite a changed line, or
+    // say the change itself is sound before anything else. Cited lines
+    // in intent files that the PR did not change are context, not note.
+    const changedLines = await changedLinesFromGit(opts.checkout, opts.base).catch(() => new Map<string, Set<number>>());
+    const intentChanged = changed.filter((f) => matchesIntent(f, opts.intent));
+    const onChangedLine = (item: ReviewNoteItem): boolean => intentChanged.length === 0 || item.citations.some((c) => {
+      const lines = changedLines.get(c.file);
+      return !!lines && [...lines].some((n) => n >= c.startLine && n <= c.endLine);
+    });
+    const saysSound = (item: ReviewNoteItem): boolean => /change itself is sound|change is sound|^sound\b/i.test(item.text.trim());
+    const reasons = [...result.reasons];
     const items: ReviewNoteItem[] = [];
     for (const item of result.plan.review) {
       if (!item.citations.every((c) => visible.has(c.file) && citationExists(opts.checkout, c))) continue; // dropped
+      if (!onChangedLine(item) && !saysSound(item)) { reasons.push(`note item dropped: it does not cite a line the pull request changed and does not say the change itself is sound first: ${item.text}`); continue; }
       const rejected = item.ordersEditForFinding !== undefined ? gateRejections.get(item.ordersEditForFinding) : undefined;
       if (rejected !== undefined) {
         items.push({ ...item, text: `Not applied: ${rejected}`, ordersEditForFinding: undefined });
+        reasons.push(`finding ${item.ordersEditForFinding} kept and produces no patch: ${rejected}`);
       } else {
         items.push(item);
       }
+    }
+    // A kept finding that produced no patch records the reason.
+    const appliedPatch = result.verdict === "accepted" ? result.patch : "";
+    if (!appliedPatch && result.findings.length && !reasons.some((r) => /kept.*no patch|produces no patch/i.test(r))) {
+      reasons.push(`kept finding(s) ${result.findings.map((f) => `${f.category} in ${f.file}`).join(", ")} produced no patch: no gate-accepted edit was applied`);
     }
     // Practices outside the registry: refused as edits, kept as note.
     for (const refused of result.refusedConventions) {
@@ -118,9 +137,10 @@ export async function review(opts: ReviewOptions): Promise<ReviewResult> {
       findings: result.findings,
       gate: result.gate,
       detail: {
-        reasons: result.reasons,
+        reasons,
         droppedFindings: result.droppedFindings,
         registry: result.registry,
+        unknownConventions: result.unknownConventions,
         tsConfig,
       },
     };
@@ -136,6 +156,7 @@ export async function review(opts: ReviewOptions): Promise<ReviewResult> {
         reasons: [],
         droppedFindings: 0,
         registry: [],
+        unknownConventions: [],
         tsConfig,
         error: e instanceof Error ? e.message : String(e),
       },

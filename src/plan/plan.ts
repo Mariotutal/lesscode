@@ -109,10 +109,22 @@ export async function planOnce(opts: {
   findings: readonly AnyFinding[];
   /** Scoped files the planner may see (default: whole checkout — legacy callers). */
   files?: string[];
+  /** Changed files + base: the note text is the diff of intent files, with files as context. */
+  changedFiles?: readonly string[];
+  baseRef?: string;
   client?: GuestClient;
 }): Promise<PlanResult> {
   const client = opts.client ?? createGuestClient({ env: { ...process.env, META_MODEL: WONDER_MODEL } });
   const sources = readCheckoutSources(opts.checkoutDir, opts.files);
+  let diffText = "";
+  if (opts.baseRef && opts.changedFiles?.length) {
+    try {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const { stdout } = await promisify(execFile)("git", ["diff", "--no-color", opts.baseRef, "--", ...opts.changedFiles], { cwd: opts.checkoutDir, maxBuffer: 64 * 1024 * 1024 });
+      diffText = stdout;
+    } catch { diffText = ""; }
+  }
   const numbered = sources.map((s) => `=== ${s.file} ===\n${s.lines.map((l, i) => `${i + 1}\t${l}`).join("\n")}`).join("\n\n");
   const findingsText = opts.findings.map((f, i) =>
     `[${i}] ${f.category} file=${f.file}` +
@@ -134,11 +146,11 @@ export async function planOnce(opts: {
           "scope-creep: action restore-from-base with empty newFiles/deleteFiles — code restores it.",
           "convention-break: action convention-fix with empty newFiles — code applies the mechanical fix.",
           "Refuse (skip) any finding whose code is load-bearing (transforms/unwraps/normalises) or not truly single-use/duplicate. When in doubt, skip.",
-          "ALSO return `review`: the senior note, in the SAME response. The note covers only what a lead would say and a checker cannot prove: a boundary that hides the wrong concept (kind boundary), a name that disagrees with the concept already in the repository (name-mismatch), a test that does not lock the behaviour the change claims (test-gap), a load-bearing symbol that must stay (load-bearing), a practice this repository has not written in its convention registry (practice), or a question for the author (question). Each item cites a line that exists. Set ordersEditForFinding only when the item orders an edit for a finding index. The note is never applied.",
+          "ALSO return `review`: the senior note, in the SAME response. The note covers only what a lead would say and a checker cannot prove: a boundary that hides the wrong concept (kind boundary), a name that disagrees with the concept already in the repository (name-mismatch), a test that does not lock the behaviour the change claims (test-gap), a load-bearing symbol that must stay (load-bearing), a practice this repository has not written in its convention registry (practice), or a question for the author (question). The change under review is the DIFF shown below; the full files are context only. Every note item must cite a line the diff changed, or state first that the change itself is sound before mentioning anything else. Do not write note items about other behaviour in a context file, or about files that only import a type from the changed file. Each item cites a line that exists. Set ordersEditForFinding only when the item orders an edit for a finding index. The note is never applied.",
           "Never edit tests. Never touch sealed paths (none are shown).",
         ].join("\n"),
       },
-      { role: "user", content: `Findings:\n${findingsText}\n\nCheckout (numbered lines):\n\n${numbered}` },
+      { role: "user", content: `Findings:\n${findingsText}\n\nDiff of the change (the change under review):\n\n${diffText || "(no diff available)"}\n\nSurrounding files as context (numbered lines):\n\n${numbered}` },
     ],
     tools: [PLAN_TOOL_DEF],
     toolChoice: "auto",
