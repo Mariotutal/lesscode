@@ -45,6 +45,7 @@ function stubClient(outputs: unknown[]): GuestClient & { calls: number } {
   } as GuestClient & { calls: number };
 }
 
+const root = process.cwd();
 const SRC = {
   "src/wrap.ts": [
     "export class Wrapper {",
@@ -275,6 +276,86 @@ describe("scope creep (code-decided)", () => {
       },
     });
     expect(r.findings.map((f) => f.file).sort()).toEqual(["src/logger.ts", "src/styles/footerStyle.ts"]);
+  });
+});
+
+describe("LES-20 verification (code decides truth)", () => {
+  const citeF = (file: string, startLine: number, endLine: number) => ({ file, startLine, endLine });
+  const run = async (dir: string, findings: unknown[]) => {
+    const client = stubClient([{ findings }]);
+    return classifyFindings({ checkoutDir: dir, client });
+  };
+
+  it("drops a transforming wrapper cited as single-use", async () => {
+    const dir = checkout({
+      "src/wrap.ts": "export function label(n: number): string {\n  return String(n).trim();\n}\n",
+      "src/use.ts": 'import { label } from "./wrap.js";\nexport const out = label(1);\n',
+    });
+    const r = await run(dir, [{ category: "single-use-abstraction", file: "src/wrap.ts", citations: [citeF("src/wrap.ts", 1, 3), citeF("src/use.ts", 2, 2)], rationale: "single-use" }]);
+    expect(r.findings).toEqual([]);
+    expect(r.verificationDropped).toHaveLength(1);
+    expect(r.verificationDropped[0]!.reason).toMatch(/not a pure forward/);
+    expect(r.dropped).toHaveLength(1);
+  });
+
+  it("drops a validating/branching wrapper cited as single-use", async () => {
+    const dir = checkout({
+      "src/wrap.ts": "export function unwrap(x: number | null): number {\n  if (x === null) throw new Error('missing');\n  return x;\n}\n",
+      "src/use.ts": 'import { unwrap } from "./wrap.js";\nexport const out = unwrap(1);\n',
+    });
+    const r = await run(dir, [{ category: "single-use-abstraction", file: "src/wrap.ts", citations: [citeF("src/wrap.ts", 1, 4)], rationale: "single-use" }]);
+    expect(r.findings).toEqual([]);
+    expect(r.verificationDropped[0]!.reason).toMatch(/not a pure forward/);
+  });
+
+  it("drops a helper used by two or more callers", async () => {
+    const dir = checkout({
+      "src/help.ts": "export function fmt(n: number): string { return String(n); }\n",
+      "src/a.ts": 'import { fmt } from "./help.js";\nexport const a = fmt(1);\n',
+      "src/b.ts": 'import { fmt } from "./help.js";\nexport const b = fmt(2);\n',
+    });
+    // Body is impure too, but the call-site count must be reported first.
+    const r = await run(dir, [{ category: "single-use-abstraction", file: "src/help.ts", citations: [citeF("src/help.ts", 1, 1)], rationale: "single-use" }]);
+    expect(r.findings).toEqual([]);
+    expect(r.verificationDropped[0]!.reason).toMatch(/2 call site\(s\)/);
+  });
+
+  it("keeps a genuine pure-forward single-use wrapper", async () => {
+    const dir = checkout(SRC);
+    const r = await run(dir, [{ category: "single-use-abstraction", file: "src/wrap.ts", citations: [citeF("src/wrap.ts", 1, 4), citeF("src/use.ts", 2, 2)], rationale: "wrapper forwards, used once" }]);
+    expect(r.findings).toHaveLength(1);
+    expect(r.verificationDropped).toEqual([]);
+  });
+
+  it("drops a non-equivalent duplicate, keeps an equivalent (renamed) one", async () => {
+    const dir = checkout({
+      "src/lib/format.ts": "export function fmt(value: number): string {\n  return '$' + value.toFixed(2);\n}\n",
+      "src/dup.ts": "export function fmt(amount: number): string {\n  return '$' + amount.toFixed(2);\n}\n",
+      "src/bad.ts": "export function fmt(amount: number): string {\n  return 'EUR ' + amount.toFixed(3);\n}\n",
+    });
+    const dup = { category: "duplicate-helper", file: "src/dup.ts", existingHelperFile: "src/lib/format.ts", citations: [citeF("src/dup.ts", 1, 3), citeF("src/lib/format.ts", 1, 3)], rationale: "duplicate" };
+    const bad = { ...dup, file: "src/bad.ts", citations: [citeF("src/bad.ts", 1, 3), citeF("src/lib/format.ts", 1, 3)] };
+    const r = await run(dir, [dup, bad]);
+    expect(r.findings).toEqual([expect.objectContaining({ file: "src/dup.ts" })]);
+    expect(r.verificationDropped).toHaveLength(1);
+    expect(r.verificationDropped[0]!.finding.file).toBe("src/bad.ts");
+    expect(r.verificationDropped[0]!.reason).toMatch(/not equivalent/);
+  });
+
+  it("fixtures 1 and 2 still classify: verified findings are kept", async () => {
+    const f1 = join(root, "fixtures/1/bloated");
+    const spark1 = [
+      { category: "single-use-abstraction", file: "src/userApiClient.ts", citations: [citeF("src/userApiClient.ts", 1, 6)], rationale: "single-use" },
+      { category: "single-use-abstraction", file: "src/userRepository.ts", citations: [citeF("src/userRepository.ts", 1, 7)], rationale: "single-use" },
+      { category: "single-use-abstraction", file: "src/userService.ts", citations: [citeF("src/userService.ts", 1, 7)], rationale: "single-use" },
+    ];
+    const r1 = await run(f1, spark1);
+    expect(r1.verificationDropped).toEqual([]);
+    expect(r1.findings).toHaveLength(3);
+    const f2 = join(root, "fixtures/2/bloated");
+    const r2 = await run(f2, [{ category: "duplicate-helper", file: "src/checkout/formatMoney.ts", existingHelperFile: "src/lib/formatMoney.ts", citations: [citeF("src/checkout/formatMoney.ts", 1, 8), citeF("src/lib/formatMoney.ts", 1, 8)], rationale: "duplicate" }]);
+    expect(r2.verificationDropped).toEqual([]);
+    expect(r2.findings).toHaveLength(1);
   });
 });
 
