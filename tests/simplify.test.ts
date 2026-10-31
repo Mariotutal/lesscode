@@ -90,11 +90,14 @@ describe("simplify", () => {
       "}",
       "",
     ].join("\n");
+    // LES-21: Wonder chooses actions only; code generates contents
+    // as AST codemods, outermost wrapper first.
     const wonder = [
-      { findingIndex: 0, action: "inline", newFiles: [{ file: "src/userFetcher.ts", content: fetcherViaRepo }, { file: "src/userRepository.ts", content: repoDirect }], deleteFiles: ["src/userApiClient.ts"], rationale: "inline" },
-      { findingIndex: 1, action: "inline", newFiles: [{ file: "src/userFetcher.ts", content: newFetcher }], deleteFiles: ["src/userRepository.ts", "src/userService.ts"], rationale: "inline" },
-      { findingIndex: 2, action: "inline", newFiles: [], deleteFiles: [], rationale: "already inlined by previous edit" },
+      { findingIndex: 0, action: "inline", newFiles: [], deleteFiles: [], rationale: "inline" },
+      { findingIndex: 1, action: "inline", newFiles: [], deleteFiles: [], rationale: "inline" },
+      { findingIndex: 2, action: "inline", newFiles: [], deleteFiles: [], rationale: "inline" },
     ];
+    void newFetcher; void fetcherViaRepo; void repoDirect;
     const r = await simplify({ checkout: dir, base: "base", intent: ["src/userFetcher.ts", "src/userApiClient.ts", "src/userRepository.ts", "src/userService.ts"], sparkClient: scripted(spark, wonder), wonderClient: scripted(spark, wonder) });
     expect(r.verdict).toBe("accepted");
     expect(r.patch).toContain("src/userFetcher.ts");
@@ -119,8 +122,9 @@ describe("simplify", () => {
       "",
     ].join("\n");
     const wonder = [
-      { findingIndex: 0, action: "retarget", newFiles: [{ file: "src/checkout/checkout.ts", content: newCheckout }], deleteFiles: ["src/checkout/formatMoney.ts"], rationale: "retarget" },
+      { findingIndex: 0, action: "retarget", newFiles: [], deleteFiles: [], rationale: "retarget" },
     ];
+    void newCheckout;
     const client = scripted(spark, wonder);
     const r = await simplify({ checkout: dir, base: "base", intent: ["src/checkout/checkout.ts", "src/checkout/formatMoney.ts"], sparkClient: client, wonderClient: client });
     expect(r.verdict).toBe("accepted");
@@ -212,16 +216,26 @@ describe("simplify", () => {
       "}",
       "",
     ].join("\n");
+    // LES-21: contents are code-generated. Finding 0 cites lineTotal
+    // (24-27, mechanical single-return forward -> codemod inlines it).
+    // Verification drops the broad second finding before planning
+    // (discountRate is called inside lineTotal as well as totalPrice,
+    // i.e. not single-use / not a pure forward), so Wonder's index-1
+    // edit is refused as out-of-range in the plan — same kept/dropped
+    // split, decided in code rather than by the gate.
     const wonder = [
-      { findingIndex: 0, action: "inline", newFiles: [{ file: "src/pricing.ts", content: afterA }], deleteFiles: [], rationale: "inline lineTotal" },
-      { findingIndex: 1, action: "inline", newFiles: [{ file: "src/pricing.ts", content: god }], deleteFiles: [], rationale: "inline remaining helpers" },
+      { findingIndex: 0, action: "inline", newFiles: [], deleteFiles: [], rationale: "inline lineTotal" },
+      { findingIndex: 1, action: "skip", newFiles: [], deleteFiles: [], rationale: "no mechanical codemod edit expresses inlining branching helpers discountRate and applyPromotions" },
     ];
+    void afterA; void god;
     const client = scripted(spark, wonder);
     const r = await simplify({ checkout: dir, base: "base", intent: ["src/pricing.ts"], sparkClient: client, wonderClient: client });
     // Earlier edit kept, complexity edit dropped: accepted with only A.
     expect(r.verdict, JSON.stringify({ gate: r.gate?.checks, reasons: r.reasons }, null, 2)).toBe("accepted");
     expect(r.patch).toContain("applyPromotions(line, discountRate(line))");
     expect(r.patch).not.toContain('if (line.category === "clearance") rate = 0.4;');
-    expect(r.reasons.join(" ")).toMatch(/complexity|cyclomatic|gate rejected/);
+    // LES-21: the second edit is not a mechanical codemod, so it is
+    // skipped in code rather than dropped by the gate.
+    expect(JSON.stringify(r.apply.skipped)).toMatch(/codemod|mechanical/);
   }, 300_000);
 });

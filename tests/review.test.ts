@@ -71,11 +71,7 @@ describe("review", () => {
       { category: "single-use-abstraction", file: "src/userApi.js", citations: [cite("src/userApi.js", 1, 5)], rationale: "single-use JS wrapper" },
     ];
     const wonder = [
-      {
-        findingIndex: 0, action: "inline",
-        newFiles: [{ file: "src/userLabel.js", content: 'import { getJson } from "./client.js";\nexport function fetchUserLabel(id) {\n  return getJson(`/users/${id}`).then((user) => `${user.name} <${user.email}>`);\n}\n' }],
-        deleteFiles: ["src/userApi.js"], rationale: "inline the JS wrapper",
-      },
+      { findingIndex: 0, action: "inline", newFiles: [], deleteFiles: [], rationale: "inline the JS wrapper" },
     ];
     const { client, state } = scripted(spark, wonder);
     const r = await review({ checkout: dir, base: "base", intent: ["src/userLabel.js", "src/userApi.js"], sparkClient: client, wonderClient: client });
@@ -146,8 +142,9 @@ describe("review", () => {
       { category: "single-use-abstraction", file: "src/pricing.ts", citations: [cite("src/pricing.ts", 10, 23)], rationale: "helpers look single-use" },
     ];
     const wonder = [
-      { findingIndex: 0, action: "inline", newFiles: [{ file: "src/pricing.ts", content: god }], deleteFiles: [], rationale: "inline all helpers" },
+      { findingIndex: 0, action: "inline", newFiles: [], deleteFiles: [], rationale: "inline all helpers" },
     ];
+    void god;
     const note = [
       { kind: "boundary", text: "Inline every pricing helper into totalPrice.", citations: [cite("src/pricing.ts", 10, 23)], ordersEditForFinding: 0 },
     ];

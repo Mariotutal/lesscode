@@ -102,35 +102,35 @@ describe("applyPlan", () => {
     expect(r.editSet).toEqual(["src/use.ts", "src/wrap.ts"]);
   });
 
-  it("one repair turn on tsc failure, then skips and reverts that finding", async () => {
+  it("no repair turn on tsc failure: skips and reverts that finding (LES-21)", async () => {
     const d = dir(FILES);
     const client = stub([{ newFiles: [{ file: "src/use.ts", content: "still broken" }] }]);
-    let tscCalls = 0;
     const r = await applyPlan({
       checkoutDir: d, baseRef: "base", findings: [WRAP],
-      edits: [{ findingIndex: 0, action: "inline", newFiles: [{ file: "src/use.ts", content: "broken" }], deleteFiles: ["src/wrap.ts"], rationale: "x" }],
+      edits: [{ findingIndex: 0, action: "inline", newFiles: [], deleteFiles: [], rationale: "x" }],
       client,
-      runTsc: async () => (++tscCalls ? "error TS2304: nope" : null),
+      runTsc: async () => "error TS2304: nope",
     });
-    expect(client.calls).toBe(1); // exactly one repair turn
+    expect(client.calls).toBe(0); // no repair turn is ever taken
+    expect(r.repairCalls).toBe(0);
     expect(r.applied).toEqual([]);
-    expect(r.skipped[0]!.reason).toMatch(/one repair turn/);
+    expect(r.skipped[0]!.reason).toMatch(/no repair turn/);
     expect(readFileSync(join(d, "src/use.ts"), "utf8")).toBe(FILES["src/use.ts"]); // reverted
     expect(existsSync(join(d, "src/wrap.ts"))).toBe(true);
   });
 
-  it("repair that fixes tsc is kept and marked repaired", async () => {
+  it("refuses model-supplied contents that alter an unrelated statement", async () => {
     const d = dir(FILES);
-    const client = stub([{ newFiles: [{ file: "src/use.ts", content: INLINED_USE }] }]);
-    let n = 0;
+    const tampered = "export const out = { get: () => 1 }.get();\nexport const unrelated = 99;\n";
     const r = await applyPlan({
       checkoutDir: d, baseRef: "base", findings: [WRAP],
-      edits: [{ findingIndex: 0, action: "inline", newFiles: [{ file: "src/use.ts", content: "broken" }], deleteFiles: ["src/wrap.ts"], rationale: "x" }],
-      client,
-      runTsc: async () => (++n === 1 ? "error TS2304: nope" : null),
+      edits: [{ findingIndex: 0, action: "inline", newFiles: [{ file: "src/use.ts", content: tampered }], deleteFiles: [], rationale: "x" }],
+      runTsc: async () => null,
     });
-    expect(r.applied).toHaveLength(1);
-    expect(r.applied[0]!.repaired).toBe(true);
+    expect(r.applied).toEqual([]);
+    expect(r.skipped[0]!.reason).toMatch(/unrelated-change guard/);
+    expect(readFileSync(join(d, "src/use.ts"), "utf8")).toBe(FILES["src/use.ts"]);
+    expect(existsSync(join(d, "src/wrap.ts"))).toBe(true);
   });
 
   it("restore-from-base comes from git, not the model", async () => {

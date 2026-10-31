@@ -3,6 +3,7 @@ import { buildSymbolGraph } from "../gate/symbolGraph.js";
 import { isSourceFile, listClassifiableFiles, readCheckoutSources } from "./checkout.js";
 import { isSealedPath, normaliseRepoPath } from "./evidence.js";
 import type { Finding } from "./schema.js";
+import { declName, findTarget, parse, topLevelDecls, type CitedTarget } from "./target.js";
 
 /**
  * Code verification of model findings (LES-20): between classify and
@@ -30,62 +31,7 @@ export interface VerificationResult {
   dropped: VerificationDrop[];
 }
 
-interface Target {
-  name: string;
-  /** Enclosing class name when the target is a method. */
-  className?: string;
-  decl: ts.Node;
-  file: string;
-}
-
-function parse(file: string, text: string): ts.SourceFile {
-  return ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
-}
-
-function overlaps(sf: ts.SourceFile, node: ts.Node, ranges: { start: number; end: number }[]): boolean {
-  const start = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-  const end = sf.getLineAndCharacterOfPosition(node.getEnd()).line + 1;
-  return ranges.some((r) => start <= r.end && r.start <= end);
-}
-
-function topLevelDecls(sf: ts.SourceFile): ts.Node[] {
-  const out: ts.Node[] = [];
-  sf.forEachChild((n) => {
-    if (ts.isVariableStatement(n)) for (const d of n.declarationList.declarations) out.push(d);
-    else out.push(n);
-  });
-  return out;
-}
-
-function declName(node: ts.Node): string | undefined {
-  if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isVariableDeclaration(node)) && node.name && ts.isIdentifier(node.name)) return node.name.text;
-  return undefined;
-}
-
-/** Smallest declaration in `file` overlapping a citation in that file. */
-function findTarget(sf: ts.SourceFile, file: string, finding: Finding): Target | undefined {
-  const ranges = finding.citations.filter((c) => c.file === file).map((c) => ({ start: c.startLine, end: c.endLine }));
-  if (!ranges.length) return undefined;
-  const tops = topLevelDecls(sf).filter((n) => declName(n) !== undefined && overlaps(sf, n, ranges));
-  tops.sort((a, b) => a.getText(sf).length - b.getText(sf).length);
-  const top = tops[0];
-  if (!top) return undefined;
-  // A citation pinpointing one method of a class targets that method.
-  if (ts.isClassDeclaration(top)) {
-    const methods = top.members.filter((m): m is ts.MethodDeclaration => ts.isMethodDeclaration(m) && overlaps(sf, m, ranges));
-    // Only narrow when a citation starts inside the method (not the class head).
-    const pinpointed = methods.filter((m) => ranges.some((r) => {
-      const s = sf.getLineAndCharacterOfPosition(m.getStart(sf)).line + 1;
-      const classStart = sf.getLineAndCharacterOfPosition(top.getStart(sf)).line + 1;
-      return r.start >= s && classStart < r.start;
-    }));
-    if (pinpointed.length === 1 && pinpointed[0]!.name && ts.isIdentifier(pinpointed[0]!.name)) {
-      return { name: pinpointed[0]!.name.text, className: top.name?.text, decl: pinpointed[0]!, file };
-    }
-  }
-  const name = declName(top);
-  return name ? { name, decl: top, file } : undefined;
-}
+type Target = CitedTarget;
 
 /** Resolve a relative import specifier onto a file in the set. */
 function resolveSpec(fromFile: string, spec: string, files: Set<string>): string | undefined {
@@ -167,10 +113,33 @@ function impureReason(body: ts.Node, insideClass = false): string | undefined {
   let expr: ts.Node;
   if (ts.isBlock(body)) {
     const only = body.statements[0];
-    if (body.statements.length !== 1 || !only || !ts.isReturnStatement(only) || !only.expression) {
+    if (body.statements.length === 1 && only && ts.isReturnStatement(only) && only.expression) {
+      expr = only.expression;
+    } else if (
+      // Multi-statement forward: local bindings that are pure calls,
+      // then a return over locals/params (e.g. lineTotal binds `rate`
+      // from applyPromotions(...) and returns arithmetic on it). The
+      // AST codemod splices these statements verbatim, so no branch
+      // or transform is hidden — branching in any statement still
+      // fails the FORBIDDEN scan below.
+      body.statements.length > 1 &&
+      body.statements.slice(0, -1).every((s) => ts.isVariableStatement(s)) &&
+      ts.isReturnStatement(body.statements.at(-1)!) &&
+      (body.statements.at(-1) as ts.ReturnStatement).expression
+    ) {
+      let bad: string | undefined;
+      for (const s of body.statements) {
+        const scan = (n: ts.Node): void => {
+          if (bad) return;
+          if (n !== s && FORBIDDEN.has(n.kind) && n.kind !== ts.SyntaxKind.BinaryExpression) { bad = `body contains ${ts.SyntaxKind[n.kind]}`; return; }
+          n.forEachChild(scan);
+        };
+        scan(s);
+      }
+      return bad;
+    } else {
       return "body is not a single return statement";
     }
-    expr = only.expression;
   } else {
     expr = body;
   }

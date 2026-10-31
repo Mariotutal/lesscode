@@ -84,8 +84,9 @@ describe("simplify tool", () => {
       "",
     ].join("\n");
     const wonder = [
-      { findingIndex: 0, action: "retarget", newFiles: [{ file: "src/checkout/checkout.ts", content: newCheckout }], deleteFiles: ["src/checkout/formatMoney.ts"], rationale: "retarget" },
+      { findingIndex: 0, action: "retarget", newFiles: [], deleteFiles: [], rationale: "retarget" },
     ];
+    void newCheckout;
     const client = scripted(spark, wonder);
     const args = { checkout: dir, base: "base", intent: ["src/checkout/checkout.ts", "src/checkout/formatMoney.ts"] };
 
