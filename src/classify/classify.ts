@@ -10,6 +10,7 @@ import {
   type Finding,
 } from "./schema.js";
 import { decideScopeCreep, type ScopeCreepFinding } from "./scopeCreep.js";
+import { verifyFindings, type VerificationDrop } from "./verify.js";
 
 export const REPORT_TOOL = "report_findings";
 
@@ -78,8 +79,10 @@ export interface ClassifyOptions {
 export interface ClassifyResult {
   /** Findings that survived zod, evidence, and (for conventions) fix-or-refuse. */
   findings: (Finding | ScopeCreepFinding)[];
-  /** Model findings dropped because cited lines do not exist (or file is sealed/outside). */
+  /** Model findings dropped because cited lines do not exist (or file is sealed/outside), or verification failed. */
   dropped: Finding[];
+  /** Findings dropped by the code verification pass (LES-20), with reasons. */
+  verificationDropped: VerificationDrop[];
   /** Convention names this repository wrote in lesscode-conventions.json. */
   registry: string[];
   refusedConventions: ConventionDecision[];
@@ -199,9 +202,15 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
   }
 
   const all = validated?.findings ?? [];
-  const kept = filterByEvidence(opts.checkoutDir, all);
-  const keptSet = new Set(kept);
-  const dropped = all.filter((f) => !keptSet.has(f as Finding));
+  const evidenceKept = filterByEvidence(opts.checkoutDir, all);
+  const keptSet = new Set(evidenceKept);
+  const evidenceDropped = all.filter((f) => !keptSet.has(f as Finding));
+
+  // Verification (LES-20): code decides whether single-use and
+  // duplicate findings are actually true; failures drop with a reason.
+  const verification = verifyFindings(opts.checkoutDir, evidenceKept);
+  const kept = verification.kept;
+  const dropped = [...evidenceDropped, ...verification.dropped.map((d) => d.finding)];
 
   // Convention-break: mechanical fix or refuse. A fix is applied only
   // when the repository wrote the practice down in its registry;
@@ -230,6 +239,7 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
   return {
     findings: [...finalModel, ...scopeFindings],
     dropped,
+    verificationDropped: verification.dropped,
     registry,
     refusedConventions,
     rawOutputs,
