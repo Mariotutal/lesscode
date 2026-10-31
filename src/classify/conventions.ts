@@ -4,6 +4,12 @@
  * lists the practice in its own registry (lesscode-conventions.json,
  * see loadRepositoryConventions below).
  *
+ * Most fixes are LessCode text rewrites. Two conventions —
+ * semicolons and single-quotes — have no text rewrite at all: when
+ * their ESLint rule (`semi` / `quotes`) is enabled by the repository
+ * config, the fixer is ESLint itself (eslintFix.ts); that path is
+ * still only reachable for a name written in the repository registry.
+ *
  * A convention-break finding is kept only when a registered, purely
  * mechanical fix applies to the cited text (and the fix changes it).
  * Any other convention is refused: the model may name the convention,
@@ -27,16 +33,24 @@ export const CONVENTIONS: readonly ConventionFix[] = [
     fix: (t) => t.replace(/^[ \t]*console\.log\(.*\);\n?/m, ""),
   },
   {
+    // semicolons / single-quotes intentionally have no text rewrite:
+    // raw text rewrites of quotes or semicolons can change a file in
+    // ways the repository never asked for. These entries exist only
+    // so the conventions can be named; applyConventionFix applies
+    // them through ESLint (`semi` / `quotes`, see eslintFix.ts) when
+    // the repository ESLint config enables the rule, and refuses
+    // otherwise — unless the registry names them, in which case an
+    // ESLint rule is the only mechanism that may produce the edit.
     name: "semicolons",
-    description: "Statements end with semicolons.",
-    appliesTo: (t) => /\S/.test(t) && !/[;{}:,]\s*$/.test(t.trim()),
-    fix: (t) => (/\S/.test(t) && !/[;{}:,]\s*$/.test(t.trim()) ? `${t.replace(/\s+$/, "")};` : t),
+    description: "Statements end with semicolons (applied via ESLint `semi` when enabled; never a raw text rewrite).",
+    appliesTo: () => false,
+    fix: (t) => t,
   },
   {
     name: "single-quotes",
-    description: "String literals use single quotes where the text contains no apostrophe or escapes.",
-    appliesTo: (t) => /"[^"'\\\n]*"/.test(t),
-    fix: (t) => t.replace(/"([^"'\\\n]*)"/g, "'$1'"),
+    description: "String literals use single quotes (applied via ESLint `quotes` when enabled; never a raw text rewrite).",
+    appliesTo: () => false,
+    fix: (t) => t,
   },
   {
     name: "import-extension-js",

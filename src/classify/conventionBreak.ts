@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { findConvention, loadRepositoryConventions } from "./conventions.js";
+import { eslintRuleEnabled, eslintRuleForConvention, applyEslintFix } from "./eslintFix.js";
 import type { Finding } from "./schema.js";
 
 export type ConventionDecision =
@@ -11,6 +12,11 @@ export type ConventionDecision =
  * Apply-or-refuse for convention-break findings (closed set rule):
  * keep a finding only when a registered mechanical fix applies to at
  * least one cited line range. Otherwise refuse — never guess an edit.
+ *
+ * When the convention maps to an ESLint rule the repository config
+ * already enables, the fix is applied by ESLint (see eslintFix.ts)
+ * instead of a LessCode text rewrite, so "no rule enabled, no edit"
+ * replaces the raw text rewrite for those conventions.
  */
 export function decideConventionBreak(
   checkoutDir: string,
@@ -24,14 +30,29 @@ export function decideConventionBreak(
       return { status: "refused", finding, reason: "convention-break finding names no convention" };
     }
     const convention = findConvention(name, registered);
-    if (!convention) {
+    const rule = eslintRuleForConvention(name);
+    const hasTextRewrite = convention !== undefined && hasEffectiveTextRewrite(name);
+    if (!convention || (!hasTextRewrite && !(rule && eslintRuleEnabled(checkoutDir, finding.file, rule)))) {
       return {
         status: "refused",
         finding,
         reason: registered.has(name)
-          ? `convention "${name}" is registered in the repository but has no mechanical fix`
-          : `convention "${name}" is not written in this repository's convention registry (lesscode-conventions.json)` ,
+          ? rule && !hasTextRewrite
+            ? `convention "${name}" is registered in the repository but ESLint rule "${rule}" is not enabled by the repository ESLint config, and no text rewrite may produce the edit`
+            : `convention "${name}" is registered in the repository but has no mechanical fix`
+          : `convention "${name}" is not written in this repository's convention registry (lesscode-conventions.json)`,
       };
+    }
+    if (!hasTextRewrite) {
+      // ESLint-backed fix: fixable iff ESLint actually changes the file.
+      const fixed = applyEslintFix(checkoutDir, finding.file);
+      return fixed !== undefined
+        ? { status: "fixable", finding, convention: name }
+        : {
+            status: "refused",
+            finding,
+            reason: `ESLint fix for "${name}" does not change ${finding.file}`,
+          };
     }
     let text: string;
     try {
@@ -56,14 +77,48 @@ export function decideConventionBreak(
 }
 
 /**
+ * Conventions whose catalogue entry carries an effective text rewrite.
+ * semicolons / single-quotes are catalogued with identity rewrites so
+ * they can be named, but no raw text rewrite may produce their edits.
+ */
+const TEXT_REWRITE_CONVENTIONS = new Set(["no-console-log", "import-extension-js", "no-trailing-whitespace"]);
+
+function hasEffectiveTextRewrite(name: string): boolean {
+  return TEXT_REWRITE_CONVENTIONS.has(name);
+}
+
+/**
  * Apply the registered mechanical fix to the cited ranges of a kept
- * convention-break finding. Pure text transform; callers write the file
- * and let the gate judge the result. Returns the new file contents, or
- * undefined when nothing changes (caller must then refuse).
+ * convention-break finding. Callers write the file and let the gate
+ * judge the result. Returns the new file contents, or undefined when
+ * nothing changes (caller must then refuse).
+ *
+ * This function checks the repository registry itself
+ * (lesscode-conventions.json): a practice the repository has not
+ * written down is never applied, no matter who the caller is.
+ *
+ * When the convention maps to an ESLint rule the repository ESLint
+ * configuration already enables, the fix is produced by running
+ * ESLint fix on the touched file (in the scratch worktree the caller
+ * points at) instead of a LessCode text rewrite. A raw text rewrite
+ * of quotes or semicolons never produces an edit.
  */
 export function applyConventionFix(checkoutDir: string, finding: Finding): string | undefined {
-  const convention = finding.convention ? findConvention(finding.convention) : undefined;
+  const registered = new Set(loadRepositoryConventions(checkoutDir));
+  const convention = finding.convention ? findConvention(finding.convention, registered) : undefined;
   if (!convention) return undefined;
+  const name = finding.convention!;
+
+  const rule = eslintRuleForConvention(name);
+  if (rule && eslintRuleEnabled(checkoutDir, finding.file, rule)) {
+    return applyEslintFix(checkoutDir, finding.file);
+  }
+  if (!hasEffectiveTextRewrite(name)) {
+    // No text rewrite exists for this convention (semicolons /
+    // single-quotes without the ESLint rule enabled): refuse rather
+    // than fall back to a raw text rewrite.
+    return undefined;
+  }
   const lines = readFileSync(join(checkoutDir, finding.file), "utf8").split("\n");
   let changed = false;
   for (const c of finding.citations) {
