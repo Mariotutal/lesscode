@@ -22,9 +22,16 @@ export const plannedEditSchema = z.object({
   /** Index into the findings array given to the planner. */
   findingIndex: z.number().int().nonnegative(),
   action: z.enum(PLAN_ACTIONS),
-  /** Full new contents for files this edit rewrites (inline/retarget only; code supplies restore/convention contents). */
+  /**
+   * Full new contents for files this edit rewrites. LES-21: for
+   * inline/retarget these are IGNORED — code generates the contents
+   * with AST codemods (src/plan/codemod.ts) and any model-supplied
+   * content is refused by the unrelated-change guard rather than
+   * trusted. The field stays in the schema so older responses still
+   * validate; restore/convention contents also come from code.
+   */
   newFiles: z.array(z.object({ file: z.string().min(1), content: z.string() })).default([]),
-  /** Files this edit deletes (the inlined wrapper / the duplicate copy). */
+  /** Files this edit deletes (the inlined wrapper / the duplicate copy). Ignored for inline/retarget — the codemod decides. */
   deleteFiles: z.array(z.string().min(1)).default([]),
   rationale: z.string().min(1),
 });
@@ -73,8 +80,3 @@ export type WonderOutput = z.infer<typeof wonderOutputSchema>;
 export type PlannedEdit = z.infer<typeof plannedEditSchema>;
 export type PlanOutput = z.infer<typeof planOutputSchema>;
 
-/** One repair turn returns corrected contents for a single failing edit. */
-export const repairOutputSchema = z.object({
-  newFiles: z.array(z.object({ file: z.string().min(1), content: z.string() })).min(1),
-});
-export type RepairOutput = z.infer<typeof repairOutputSchema>;
