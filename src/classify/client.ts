@@ -54,9 +54,20 @@ export interface ChatCompletionResult {
   model?: string;
 }
 
+/** Every command the gate or this model client starts gets a timeout. */
+export const DEFAULT_MODEL_TIMEOUT_MS = 300_000;
+
+/** The model request was stopped by its timeout: the run ends with this reason instead of hanging. */
+export class ModelTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`model request timed out after ${timeoutMs}ms`);
+    this.name = "ModelTimeoutError";
+  }
+}
+
 export type FetchLike = (
   url: string,
-  init: { method: string; headers: Record<string, string>; body: string },
+  init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal },
 ) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
 
 /** Minimal dependency injection point so tests can stub the wire. */
@@ -72,6 +83,8 @@ export interface GuestClient {
 export function createGuestClient(opts?: {
   env?: NodeJS.ProcessEnv;
   fetchFn?: FetchLike;
+  /** Milliseconds the model request may run before it is aborted; default 300_000. */
+  timeoutMs?: number;
 }): GuestClient {
   const config = guestConfig(opts?.env);
   const fetchFn: FetchLike =
@@ -80,6 +93,7 @@ export function createGuestClient(opts?: {
       const res = await fetch(url, init);
       return { ok: res.ok, status: res.status, text: () => res.text() };
     });
+  const timeoutMs = opts?.timeoutMs ?? DEFAULT_MODEL_TIMEOUT_MS;
   return {
     config,
     async chat(req) {
@@ -90,14 +104,27 @@ export function createGuestClient(opts?: {
         // tool_choice stays "auto" — never forced (LES-3).
         ...(req.tools ? { tool_choice: req.toolChoice ?? "auto" } : {}),
       };
-      const res = await fetchFn(`${config.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-      });
+      // Timeout: a hanging model request is aborted and the run ends
+      // with a ModelTimeoutError reason instead of hanging forever.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let res: Awaited<ReturnType<FetchLike>>;
+      try {
+        res = await fetchFn(`${config.baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } catch (e) {
+        if (controller.signal.aborted) throw new ModelTimeoutError(timeoutMs);
+        throw e;
+      } finally {
+        clearTimeout(timer);
+      }
       const raw = await res.text();
       if (!res.ok) throw new Error(`Meta API ${res.status}: ${raw.slice(0, 500)}`);
       let parsed: unknown;
