@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { evaluateGate, coveringTests, isTestFilePath, repoCommands } from "../src/gate/gate.js";
+import { clearBaseTreeCache, clearGateBaselineCache, evaluateCheapGate, evaluateGate, coveringTests, isTestFilePath, repoCommands, treeAt } from "../src/gate/gate.js";
+import { createGuestClient, ModelTimeoutError } from "../src/classify/client.js";
 import { measureSource } from "../src/gate/metrics.js";
 import { buildSymbolGraph } from "../src/gate/symbolGraph.js";
 
@@ -240,6 +241,59 @@ describe("LES-22 gate gaps", () => {
     writeFileSync(join(repo, "src/foo.ts"), "export function f(x: number) { if (x) return 1; return x; }\nexport const pad = [1,2,3,4,5,6,7,8,9];\n");
     const ok = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"] });
     expect(ok.checks.find((x) => x.name === "cyclomatic-not-over-10pct")!.passed).toBe(true);
+  });
+});
+
+describe("LES-23 gate speed", () => {
+  async function bareRepo(files: Record<string, string>, scripts: Record<string, string> = { test: "node -e \"process.exit(0)\"" }): Promise<string> {
+    const repo = mkdtempSync(join(tmpdir(), "lc-g23-"));
+    await sh(repo, "git", ["init", "-q", "-b", "base"]);
+    writeFileSync(join(repo, "package.json"), JSON.stringify({ scripts }));
+    for (const [f, text] of Object.entries(files)) { const p = join(repo, f); await sh(repo, "mkdir", ["-p", p.slice(0, p.lastIndexOf("/"))]); writeFileSync(p, text); }
+    await sh(repo, "git", ["add", "-A"]);
+    await sh(repo, "git", ["-c", "user.email=gate@local", "-c", "user.name=gate", "commit", "-qm", "base"]);
+    return repo;
+  }
+  const files = {
+    "src/foo.ts": "export const f = 1;\n",
+    "src/foo.spec.ts": 'import { f } from "./foo.js";\nit("works", () => { expect(f).toBe(1); });\n',
+  };
+  it("cheap gate runs the local checks and never the repository commands", async () => {
+    const repo = await bareRepo(files);
+    writeFileSync(join(repo, "src/foo.ts"), "export const f = 1;\nexport const g = 2;\n");
+    const r = await evaluateCheapGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"] });
+    const names = r.checks.map((c) => c.name);
+    for (const n of ["size-drops", "cyclomatic-not-over-10pct", "exports-outside-edit-set-unchanged", "exports-inside-edit-set-targeted-only", "tests-not-deleted", "edit-covered-by-related-tests"]) expect(names, n).toContain(n);
+    expect(names).not.toContain("related-tests-pass");
+    expect(names).not.toContain("tsc-passes");
+    expect(names).not.toContain("eslint-touched-passes");
+    expect(names).not.toContain("baseline-pre-existing-failures");
+  });
+  it("batched treeAt caches the base tree object across evaluations", async () => {
+    const repo = await bareRepo(files);
+    const a = await treeAt(repo, "base");
+    const b = await treeAt(repo, "base");
+    expect(b).toBe(a); // same cached Map instance: graph built once per run
+    expect(a.get("src/foo.ts")).toContain("export const f");
+    clearBaseTreeCache();
+    const c = await treeAt(repo, "base");
+    expect(c).not.toBe(a);
+    expect(c.get("src/foo.ts")).toBe(a.get("src/foo.ts"));
+  });
+  it("a test command that never exits is stopped by the timeout, ending the run with a reason", async () => {
+    clearGateBaselineCache(); clearBaseTreeCache();
+    const repo = await bareRepo(files, { test: "node -e \"setInterval(()=>{},1000)\"" });
+    writeFileSync(join(repo, "src/foo.ts"), "export const f = 1;\nexport const g = 2;\n");
+    const started = Date.now();
+    await expect(evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"], commandTimeoutMs: 800 })).rejects.toThrow(/timed out after 800ms/);
+    expect(Date.now() - started).toBeLessThan(30_000);
+  }, 60_000);
+  it("a hanging model request is aborted by the client timeout", async () => {
+    const hanging = (_url: string, init: { signal?: AbortSignal }) => new Promise<{ ok: boolean; status: number; text(): Promise<string> }>((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+    });
+    const client = createGuestClient({ env: { META_API_KEY: "test" }, fetchFn: hanging as never, timeoutMs: 100 });
+    await expect(client.chat({ messages: [{ role: "user", content: "x" }] })).rejects.toBeInstanceOf(ModelTimeoutError);
   });
 });
 
