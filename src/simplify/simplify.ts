@@ -8,7 +8,7 @@ import type { GuestClient } from "../classify/client.js";
 import { classifyFindings } from "../classify/classify.js";
 import { createGuestClient } from "../classify/client.js";
 import { isSealedPath } from "../classify/evidence.js";
-import { evaluateGate, type GateResult } from "../gate/gate.js";
+import { evaluateCheapGate, evaluateCommandGate, type GateResult } from "../gate/gate.js";
 import { findTarget, parse } from "../classify/target.js";
 import type { Finding } from "../classify/schema.js";
 import { applyPlan } from "../plan/apply.js";
@@ -95,7 +95,10 @@ function restoreSnap(repo: string, snaps: Snapshot[]): void {
 /**
  * Hide the pipeline behind one function. Spark classifies, Wonder
  * plans once, code applies edits one at a time in a scratch worktree
- * and keeps an edit only when the gate accepts the cumulative result.
+ * and keeps an edit only when the gate's cheap checks (size, exports,
+ * complexity, test-deletion, coverage) accept the cumulative result;
+ * the repository's test/typecheck/lint commands then run once, in
+ * parallel, on the cumulative kept edits, and must also pass.
  * Scope creep (diff paths outside `intent`) is restored from `base`
  * by code. The caller checkout/branch is never modified.
  */
@@ -218,7 +221,10 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
       }
 
       const candidateSet = [...new Set([...keptEditSet, ...apply.editSet])];
-      const gate = await evaluateGate({ repoDir: scratch, baseRef: headSha, editSet: candidateSet, relatedTests, coverageExempt: candidateSet.filter((f) => restoreFiles.has(f)), targetSymbols: await gateTargets(scratch, headSha, candidateSet, findings) });
+      // Split gate: cheap local checks run per edit (they gate keeping
+      // this edit); the repository's test/typecheck/lint commands run
+      // once on the cumulative kept edits after the loop, not per edit.
+      const gate = await evaluateCheapGate({ repoDir: scratch, baseRef: headSha, editSet: candidateSet, relatedTests, coverageExempt: candidateSet.filter((f) => restoreFiles.has(f)), targetSymbols: await gateTargets(scratch, headSha, candidateSet, findings) });
       lastGate = gate;
       // A lone scope-creep restore shrinks nothing by itself; keep it
       // when every non-size check passes. The final cumulative gate
@@ -250,7 +256,20 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     }
 
     const finalEditSet = [...new Set(keptEditSet)];
-    const finalGate = await evaluateGate({ repoDir: scratch, baseRef: headSha, editSet: finalEditSet, relatedTests, coverageExempt: finalEditSet.filter((f) => restoreFiles.has(f)), targetSymbols: await gateTargets(scratch, headSha, finalEditSet, findings) });
+    // Final cumulative gate: cheap checks again on the final set, plus
+    // the repository's command checks — run once here, in parallel
+    // (inside runCommandChecks), on the cumulative kept edits. The
+    // merged result is the same combined verdict a full gate gave.
+    const finalCheap = await evaluateCheapGate({ repoDir: scratch, baseRef: headSha, editSet: finalEditSet, relatedTests, coverageExempt: finalEditSet.filter((f) => restoreFiles.has(f)), targetSymbols: await gateTargets(scratch, headSha, finalEditSet, findings) });
+    const commandGate = await evaluateCommandGate({ repoDir: scratch, baseRef: headSha, editSet: finalEditSet, relatedTests });
+    const finalGate: GateResult = {
+      accepted: finalCheap.accepted && commandGate.accepted,
+      checks: [...finalCheap.checks, ...commandGate.checks],
+      metrics: finalCheap.metrics,
+      exitCodes: commandGate.exitCodes,
+      ...(commandGate.commands ? { commands: commandGate.commands } : {}),
+      ...(commandGate.baseline ? { baseline: commandGate.baseline } : {}),
+    };
     if (!finalGate.accepted) {
       return {
         verdict: "refused", patch: "", findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, refusedConventions,
