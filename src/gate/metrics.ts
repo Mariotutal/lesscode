@@ -86,6 +86,7 @@ function functionName(node: ts.Node, sf: ts.SourceFile): string {
   if (ts.isPropertyAssignment(node) && node.initializer && (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) {
     return node.name.getText(sf);
   }
+  if ((ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && node.parent && (ts.isVariableDeclaration(node.parent) || ts.isPropertyDeclaration(node.parent) || ts.isPropertyAssignment(node.parent))) return node.parent.name.getText(sf);
   // Anonymous function: identify by enclosing named declaration + kind,
   // e.g. `foo.<anonymous>` for a callback inside `foo` is still
   // positional via `key`; name alone deliberately stays <anonymous>.
@@ -130,8 +131,14 @@ export function measureSource(file: string, source: string): SourceMetrics {
     if (isFunctionLike(node)) {
       const name = functionName(node, sf);
       const kind = ts.SyntaxKind[node.kind];
-      const ordinal = seen.get(`${name}\0${kind}`) ?? 0;
-      seen.set(`${name}\0${kind}`, ordinal + 1);
+      const containers: string[] = [];
+      for (let parent = node.parent; parent && !ts.isSourceFile(parent); parent = parent.parent) {
+        if ((ts.isClassDeclaration(parent) || ts.isClassExpression(parent) || ts.isModuleDeclaration(parent)) && parent.name) containers.unshift(parent.name.getText(sf));
+        else if (isFunctionLike(parent)) containers.unshift(functionName(parent, sf));
+      }
+      const identity = `${containers.join(".")}\0${name}\0${kind}`;
+      const ordinal = seen.get(identity) ?? 0;
+      seen.set(identity, ordinal + 1);
       functions.push({
         file,
         name,
@@ -140,7 +147,7 @@ export function measureSource(file: string, source: string): SourceMetrics {
         kind,
         // Position among same name+kind declarations in the file is the
         // tie-break (declaration order is stable for a surviving function).
-        key: `${file}\0${name}\0${kind}\0${ordinal}`,
+        key: `${file}\0${identity}\0${ordinal}`,
       });
     }
     node.forEachChild(visit);

@@ -103,7 +103,7 @@ describe("run manifest (LES-26)", () => {
     expect(m.callsByModel).toEqual({ spark: 1, wonder: 1 });
     expect(m.modelCalls).toBe(2);
     expect(m.usage.total_tokens).toBe(30);
-    const sum = m.phasesMs.classify + m.phasesMs.plan + m.phasesMs.apply + m.phasesMs.gate;
+    const sum = Object.values(m.phasesMs).reduce((sum, ms) => sum + ms, 0);
     expect(Math.abs(sum - m.totalMs)).toBeLessThan(1);
     for (const v of Object.values(m.phasesMs)) expect(v).toBeGreaterThanOrEqual(0);
     expect(m.promptHashes).toHaveLength(2);

@@ -5,7 +5,7 @@ import { citationExistsInText, isSealedPath, normaliseRepoPath } from "./evidenc
 import { recoverFindings, type RecoveredFinding } from "./recover.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { decideConventionBreak, type ConventionDecision } from "./conventionBreak.js";
+import { decideConventionBreakAsync, type ConventionDecision } from "./conventionBreak.js";
 import {
   classifiedOutputSchema,
   MODEL_CATEGORIES,
@@ -71,7 +71,10 @@ const REPORT_TOOL_DEF: ToolDefinition = {
   },
 };
 
+import type { RepositoryExecutor } from "../execution/index.js";
+
 export interface ClassifyOptions {
+  executor?: RepositoryExecutor;
   checkoutDir: string;
   /** Restrict classification to these repo-relative files (default: all non-sealed .ts). */
   files?: string[];
@@ -237,7 +240,7 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
   const registry = loadRepositoryConventions(opts.checkoutDir);
   const unknownConventions = unknownConventionNames(registry);
   const conventionFindings = kept.filter((f) => f.category === "convention-break");
-  const decisions = decideConventionBreak(opts.checkoutDir, conventionFindings, registry);
+  const decisions = await decideConventionBreakAsync(opts.checkoutDir, conventionFindings, registry, opts.executor);
   const refusedConventions = decisions.filter((d) => d.status === "refused");
   const refusedSet = new Set(refusedConventions.map((d) => d.finding));
   const finalModel = kept.filter((f) => !refusedSet.has(f));

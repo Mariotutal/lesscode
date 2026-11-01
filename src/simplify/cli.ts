@@ -9,6 +9,6 @@ if (handleHelpOrError(args, usage)) process.exit(0);
 try {
   const result = await simplify({ checkout: args.values.get("repo")!, base: args.values.get("base")!, intent: args.lists.get("intent")!, relatedTests: args.lists.get("tests") ?? [] });
   console.log(JSON.stringify(result, null, 2));
-  if ("summary" in result && result.summary) console.log(result.summary);
+  if ("summary" in result && result.summary) console.error(result.summary);
   process.exit(exitCodeForVerdict(result.verdict));
 } catch (e) { console.error(e instanceof Error ? e.message : String(e)); process.exit(2); }

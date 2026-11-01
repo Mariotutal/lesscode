@@ -222,14 +222,15 @@ describe("LES-22 gate gaps", () => {
     const r = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"], targetSymbols: [{ file: "src/foo.ts", name: "gone" }] });
     expect(r.checks.find((x) => x.name === "exports-inside-edit-set-targeted-only")!.passed).toBe(true);
   });
-  it("reports pre-existing test failure as baseline, not an edit rejection", async () => {
+  it("reports a pre-existing test failure without treating it as a passing check", async () => {
     const repo = await bareRepo(files, { test: "node -e \"process.exit(1)\"" });
     writeFileSync(join(repo, "src/foo.ts"), files["src/foo.ts"] + "export const extra = 0;\n");
     const r = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"] });
     expect(r.baseline!.preExistingFailures).toContain("related-tests-pass");
     expect(r.baseline!.exitCodes.tests).toBe(1);
     const c = r.checks.find((x) => x.name === "related-tests-pass")!;
-    expect(c.passed).toBe(true); expect(c.detail).toContain("pre-existing baseline failure");
+    expect(c.passed).toBe(false); expect(c.detail).toContain("exit 1");
+    expect(r.accepted).toBe(false);
     expect(r.checks.find((x) => x.name === "baseline-pre-existing-failures")!.detail).toContain("related-tests-pass");
   });
   it("still rejects when the edit newly breaks passing tests", async () => {
@@ -246,13 +247,13 @@ describe("LES-22 gate gaps", () => {
     expect(measureSource("a.ts", after).sizeLines).toBe(measureSource("a.ts", before).sizeLines);
     expect(measureSource("a.ts", before).sizeLines).toBe(3);
   });
-  it("complexity cap lets complexity 1 -> 2 and 2 -> 3, but not 1 -> 3", async () => {
+  it("strict complexity cap rejects complexity 1 -> 2", async () => {
     const src = (body: string) => ({ "src/foo.ts": `export function f(x: number) { ${body} }\n`, "src/foo.spec.ts": 'import { f } from "./foo.js";\nit("w", () => { f(1); });\n' });
-    // This is exercised at metric level: cap = max(before*1.1, before+1)
+    // One extra branch is a 100% increase at complexity one.
     const repo = await bareRepo(src("return x;"));
     writeFileSync(join(repo, "src/foo.ts"), "export function f(x: number) { if (x) return 1; return x; }\nexport const pad = [1,2,3,4,5,6,7,8,9];\n");
     const ok = await evaluateGate({ repoDir: repo, baseRef: "base", editSet: ["src/foo.ts"], relatedTests: ["src/foo.spec.ts"] });
-    expect(ok.checks.find((x) => x.name === "cyclomatic-not-over-10pct")!.passed).toBe(true);
+    expect(ok.checks.find((x) => x.name === "cyclomatic-not-over-10pct")!.passed).toBe(false);
   });
 });
 

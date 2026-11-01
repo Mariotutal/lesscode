@@ -20,7 +20,7 @@ export interface RunManifest {
   callsByModel: { spark: number; wonder: number };
   usage: TokenUsage;
   /** Wall-clock milliseconds per phase; they sum to totalMs. */
-  phasesMs: { classify: number; plan: number; apply: number; gate: number };
+  phasesMs: { resolve: number; prepare: number; classify: number; plan: number; apply: number; gate: number; finalize: number; cleanup: number; overhead: number };
   totalMs: number;
   /** SHA-256 (hex) of each prompt sent, in send order. Hashes only. */
   promptHashes: string[];
@@ -44,7 +44,7 @@ export function addUsage(into: TokenUsage, u?: { prompt_tokens?: number; complet
 
 /** Accumulator threaded through a run; phases timed by the caller. */
 export class ManifestBuilder {
-  readonly phasesMs = { classify: 0, plan: 0, apply: 0, gate: 0 };
+  readonly phasesMs = { resolve: 0, prepare: 0, classify: 0, plan: 0, apply: 0, gate: 0, finalize: 0, cleanup: 0, overhead: 0 };
   readonly usage = emptyUsage();
   readonly promptHashes: string[] = [];
   sparkCalls = 0;
@@ -65,11 +65,8 @@ export class ManifestBuilder {
 
   build(): RunManifest {
     const totalMs = performance.now() - this.started;
-    // Phase times must sum to the run: any time outside a named phase
-    // (setup, worktree, diff) is attributed to `gate`, the final phase,
-    // so sum(phasesMs) === totalMs exactly.
-    const named = this.phasesMs.classify + this.phasesMs.plan + this.phasesMs.apply;
-    this.phasesMs.gate = Math.max(0, totalMs - named);
+    const measured = Object.entries(this.phasesMs).filter(([phase]) => phase !== "overhead").reduce((sum, [, ms]) => sum + ms, 0);
+    this.phasesMs.overhead = Math.max(0, totalMs - measured);
     return {
       models: { spark: this.sparkModel, wonder: this.wonderModel },
       modelCalls: this.sparkCalls + this.wonderCalls,
@@ -112,7 +109,7 @@ export function renderRunSummary(s: HumanRunSummary): string {
     "",
     `Models: spark=${m.models.spark}, wonder=${m.models.wonder}; calls=${m.modelCalls} (spark ${m.callsByModel.spark}, wonder ${m.callsByModel.wonder})`,
     `Tokens: prompt=${m.usage.prompt_tokens}, completion=${m.usage.completion_tokens}, total=${m.usage.total_tokens}`,
-    `Phases: classify=${ms(m.phasesMs.classify)}, plan=${ms(m.phasesMs.plan)}, apply=${ms(m.phasesMs.apply)}, gate=${ms(m.phasesMs.gate)}, total=${ms(m.totalMs)}`,
+    `Phases: ${Object.entries(m.phasesMs).map(([phase, duration]) => `${phase}=${ms(duration)}`).join(", ")}, total=${ms(m.totalMs)}`,
     `Prompt hashes: ${m.promptHashes.length ? m.promptHashes.join(", ") : "(none)"}`,
     "",
   );

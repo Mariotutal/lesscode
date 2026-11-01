@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import ts from "typescript";
-import { isSealedPath } from "./evidence.js";
+import { isSealedPath, normaliseRepoPath } from "./evidence.js";
 
 const exec = promisify(execFile);
 
@@ -206,7 +206,7 @@ export function assertFitsWindow(label: string, model: string, promptChars: numb
 }
 
 export function readCheckoutSources(checkoutDir: string, files?: string[]): CheckoutSource[] {
-  return (files ?? listClassifiableFiles(checkoutDir)).map((file) => {
+  return (files ?? listClassifiableFiles(checkoutDir)).filter((file) => !isSealedPath(file) && normaliseRepoPath(checkoutDir, file) === file && isSourceFile(file)).map((file) => {
     const text = readFileSync(join(checkoutDir, file), "utf8");
     return { file, text, lines: text.split("\n") };
   });
@@ -238,9 +238,8 @@ export function readTsConfig(checkoutDir: string): CheckoutTsConfig {
 /** Non-empty changed-file list from git (names only; no content from sealed dirs). */
 export async function changedFilesFromGit(checkoutDir: string, baseRef: string): Promise<string[]> {
   // Tracked changes only: an untracked local file is not part of the PR.
-  const tracked = await git(checkoutDir, ["diff", "--name-only", baseRef]);
-  const names = tracked.split("\n")
-    .map((s) => s.trim())
+  const tracked = await git(checkoutDir, ["diff", "--name-only", "-z", baseRef, "--"]);
+  const names = tracked.split("\0")
     .filter(Boolean)
     .filter((f) => !isSealedPath(f) && !f.includes("node_modules/"));
   return [...new Set(names)].sort();

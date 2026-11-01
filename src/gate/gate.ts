@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { constants, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -7,6 +7,8 @@ import ts from "typescript";
 import { buildSymbolGraph, transitiveImports } from "./symbolGraph.js";
 import { measureSource } from "./metrics.js";
 import { isSourceFile } from "../classify/checkout.js";
+import { isSealedPath } from "../classify/evidence.js";
+import { repositoryEnvironment, trustedLocalExecutor, type RepositoryExecutor } from "../execution/index.js";
 
 const exec = promisify(execFile);
 
@@ -47,29 +49,23 @@ export async function evaluateCheapGate(opts: GateOptions): Promise<GateResult> 
 
 /**
  * Only the repository's command checks (test, typecheck, lint), in
- * parallel, with the baseline pass/fail semantics of the full gate:
- * failures already present on the untouched tree are repository state,
- * not a rejection of the cumulative edits. `accepted` reflects only
+ * parallel. Baseline failures are reported, never waived. `accepted` reflects only
  * these command checks; combine with evaluateCheapGate for a verdict.
  */
 export async function evaluateCommandGate(opts: GateOptions): Promise<GateResult> {
   const timeoutMs = opts.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
+  opts = { ...opts, baseRef: (await git(opts.repoDir, ["rev-parse", "--verify", "--end-of-options", `${opts.baseRef}^{commit}`], timeoutMs)).trim() };
   const repo = opts.repoDir;
   const checks: GateCheck[] = [];
   const exitCodes: GateResult["exitCodes"] = { tests: null, tsc: null, eslint: null };
   const nameStatus = await git(repo, ["diff", "--name-status", opts.baseRef], timeoutMs);
   const changedFiles = nameStatus.split("\n").filter(Boolean).map((l) => l.split("\t").at(-1)!);
   const touchedTs = changedFiles.filter((f) => isSourceFile(f) && existsSync(join(repo, f)));
-  const baseline = opts.baseline ?? await measureBaseline({ repoDir: opts.repoDir, baseRef: opts.baseRef, relatedTests: opts.relatedTests, commandTimeoutMs: timeoutMs });
-  const ran = await runCommandChecks(repo, opts.relatedTests, repoCommands(repo), touchedTs, timeoutMs);
+  const baseline = opts.baseline ?? await measureBaseline({ ...opts, commandTimeoutMs: timeoutMs });
+  const ran = await runCommandChecks(repo, opts.relatedTests, repoCommands(repo), touchedTs, timeoutMs, opts.executor, opts.signal);
   Object.assign(exitCodes, ran.exitCodes);
   if (ran.timedOut) checks.push({ name: "command-timeout", passed: false, detail: `a repository command timed out after ${timeoutMs}ms and was stopped; the run ends instead of hanging` });
-  const preExisting = new Set(baseline.preExistingFailures);
-  for (const c of ran.checks) {
-    checks.push(!c.passed && !ran.timedOut && preExisting.has(c.name)
-      ? { name: c.name, passed: true, detail: `${c.detail}; pre-existing baseline failure on the untouched checkout — repository state, not caused by this edit` }
-      : c);
-  }
+  checks.push(...ran.checks);
   checks.push({
     name: "baseline-pre-existing-failures",
     passed: true,
@@ -91,7 +87,7 @@ export function repoCommands(repo: string): { test?: string; typecheck?: string;
     const typecheckScript = s.typecheck ? "npm run typecheck" : s.tsc ? "npm run tsc" : undefined;
     return {
       test: s.test,
-      typecheck: typecheckScript ?? (existsSync(join(repo, "tsconfig.json")) ? "npx tsc --noEmit" : undefined),
+      typecheck: typecheckScript ?? (existsSync(join(repo, "tsconfig.json")) ? "./node_modules/.bin/tsc --noEmit" : undefined),
       lint: s.lint ? "npm run lint" : undefined,
     };
   } catch { return {}; }
@@ -108,7 +104,7 @@ export function isTestFilePath(f: string): boolean {
  * no longer imports the deleted wrapper, so the after tree would
  * make every legitimate inline look uncovered.
  */
-export function coveringTests(tree: Map<string, string>, file: string): string[] {
+export function coveringTests(tree: Map<string, string>, file: string, sourceGraph?: ReturnType<typeof buildSymbolGraph>): string[] {
   // Importer/reachability questions go to the checker-resolved
   // symbol graph (LES-29), not a regex over specifiers. One gap:
   // the graph's program does not resolve CommonJS `require()`
@@ -116,7 +112,7 @@ export function coveringTests(tree: Map<string, string>, file: string): string[]
   // test.js requiring the change). Those edges are added from the
   // parsed AST — still checker-set files, resolved by the graph's
   // own file set — before asking the graph who reaches `file`.
-  const graph = buildSymbolGraph(tree);
+  const graph = sourceGraph ?? buildSymbolGraph(tree);
   for (const [f, text] of tree) {
     const entry = graph.get(f);
     if (!entry) continue;
@@ -154,6 +150,8 @@ export interface GateOptions {
   baseRef: string;
   /** Milliseconds every command the gate starts may run before it is killed; default 300_000 (5 min). */
   commandTimeoutMs?: number;
+  executor?: RepositoryExecutor;
+  signal?: AbortSignal;
   /** files the patch is allowed to change (edit set); exports elsewhere must stay identical */
   editSet: string[];
   /** explicit related test files/dirs to run, relative to repoDir */
@@ -195,17 +193,19 @@ function isTimeoutError(e: unknown): boolean {
 
 async function execTimed(cmd: string, args: string[], cwd: string, timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
   try {
-    return await exec(cmd, args, { cwd, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 });
+    const env = { ...repositoryEnvironment(tmpdir()), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0" };
+    const safeArgs = cmd === "git" ? ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args] : args;
+    return await exec(cmd, safeArgs, { cwd, env, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 });
   } catch (e) {
     if (isTimeoutError(e)) throw new CommandTimeoutError(`${cmd} ${args.join(" ")}`, timeoutMs);
     throw e;
   }
 }
 
-const baselineCache = new Map<string, Promise<GateBaseline>>();
+let baselineCaches = new WeakMap<RepositoryExecutor, Map<string, Promise<GateBaseline>>>();
 
 /** Drop cached baselines (tests / long-lived processes with moving refs). */
-export function clearGateBaselineCache(): void { baselineCache.clear(); }
+export function clearGateBaselineCache(): void { baselineCaches = new WeakMap(); }
 
 const baseTreeCache = new Map<string, Promise<Map<string, string>>>();
 
@@ -214,55 +214,52 @@ export function clearBaseTreeCache(): void { baseTreeCache.clear(); baseGraphCac
 
 const baseGraphCache = new Map<string, ReturnType<typeof buildSymbolGraph>>();
 
+function cacheSet<T>(cache: Map<string, T>, key: string, value: T): void {
+  // Worker processes can review indefinitely without retaining every previous checkout.
+  if (cache.size >= 8 && !cache.has(key)) cache.delete(cache.keys().next().value!);
+  cache.set(key, value);
+}
+
 function cachedBaseGraph(key: string, tree: Map<string, string>): ReturnType<typeof buildSymbolGraph> {
   let graph = baseGraphCache.get(key);
-  if (!graph) { graph = buildSymbolGraph(tree); baseGraphCache.set(key, graph); }
+  if (!graph) { graph = buildSymbolGraph(tree); cacheSet(baseGraphCache, key, graph); }
   return graph;
 }
 
-/** One killed command -> exit code 1 plus a named timeout check failure (never a hang, never swallowed as baseline). */
-interface TimedResult { exitCode: number; timedOut: boolean; timeoutMs: number }
-
-async function run(cmd: string, args: string[], cwd: string, timeoutMs: number): Promise<TimedResult> {
-  try { await execTimed(cmd, args, cwd, timeoutMs); return { exitCode: 0, timedOut: false, timeoutMs }; }
-  catch (e) {
-    if (e instanceof CommandTimeoutError) return { exitCode: 1, timedOut: true, timeoutMs };
-    const err = e as { code?: unknown }; return { exitCode: typeof err.code === "number" ? err.code : 1, timedOut: false, timeoutMs };
-  }
-}
-
 async function git(repo: string, args: string[], timeoutMs: number = DEFAULT_COMMAND_TIMEOUT_MS): Promise<string> {
-  const { stdout } = await execTimed("git", args, repo, timeoutMs);
+  const safeArgs = args[0] === "diff" ? ["diff", "--no-ext-diff", "--no-textconv", ...args.slice(1)] : args;
+  const { stdout } = await execTimed("git", safeArgs, repo, timeoutMs);
   return stdout;
 }
 
 /** Run the repo's command checks once on the untouched base tree, in a scratch worktree. */
-export async function measureBaseline(opts: Pick<GateOptions, "repoDir" | "baseRef" | "relatedTests" | "commandTimeoutMs">): Promise<GateBaseline> {
-  const key = `${opts.repoDir}\0${opts.baseRef}\0${opts.relatedTests.join(",")}`;
-  let pending = baselineCache.get(key);
+export async function measureBaseline(opts: Pick<GateOptions, "repoDir" | "baseRef" | "relatedTests" | "commandTimeoutMs" | "executor" | "signal">): Promise<GateBaseline> {
+  const executor = opts.executor ?? trustedLocalExecutor;
+  const sha = (await git(opts.repoDir, ["rev-parse", "--verify", "--end-of-options", `${opts.baseRef}^{commit}`])).trim();
+  const key = `${opts.repoDir}\0${sha}\0${JSON.stringify(opts.relatedTests)}\0${opts.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS}`;
+  let cache = baselineCaches.get(executor);
+  if (!cache) { cache = new Map(); baselineCaches.set(executor, cache); }
+  let pending = cache.get(key);
   if (!pending) {
     pending = (async () => {
       const parent = mkdtempSync(join(tmpdir(), "lc-gate-baseline-"));
       const scratch = join(parent, "repo");
       try {
         const timeoutMs = opts.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
-        const sha = (await git(opts.repoDir, ["rev-parse", opts.baseRef])).trim();
-        await execTimed("git", ["worktree", "add", "--detach", scratch, sha], opts.repoDir, timeoutMs);
-        if (existsSync(join(opts.repoDir, "node_modules")) && !existsSync(join(scratch, "node_modules"))) {
-          await execTimed("ln", ["-s", join(opts.repoDir, "node_modules"), join(scratch, "node_modules")], opts.repoDir, timeoutMs);
+        await execTimed("git", ["clone", "--quiet", "--no-hardlinks", "--no-checkout", opts.repoDir, scratch], opts.repoDir, timeoutMs);
+        await execTimed("git", ["sparse-checkout", "set", "--no-cone", "/*", "!**/sealed/", "!/node_modules/"], scratch, timeoutMs);
+        await execTimed("git", ["checkout", "--quiet", "--detach", sha], scratch, timeoutMs);
+        if (executor.kind === "trusted-local" && existsSync(join(opts.repoDir, "node_modules"))) {
+          cpSync(realpathSync(join(opts.repoDir, "node_modules")), join(scratch, "node_modules"), { recursive: true, mode: constants.COPYFILE_FICLONE });
         }
-        const commands = repoCommands(scratch);
-        const ran = await runCommandChecks(scratch, opts.relatedTests, commands, (await git(scratch, ["diff", "--name-only", sha])).split("\n").filter(Boolean), timeoutMs);
+        await executor.prepare(scratch);
+        const ran = await runCommandChecks(scratch, opts.relatedTests, repoCommands(scratch), [], timeoutMs, executor, opts.signal);
         if (ran.timedOut) throw new CommandTimeoutError("baseline command checks", timeoutMs);
         return { exitCodes: ran.exitCodes, preExistingFailures: ran.checks.filter((c) => !c.passed).map((c) => c.name) };
-      } finally {
-        await exec("git", ["worktree", "remove", "--force", scratch], { cwd: opts.repoDir }).catch(() => undefined);
-        await exec("git", ["worktree", "prune"], { cwd: opts.repoDir }).catch(() => undefined);
-        rmSync(parent, { recursive: true, force: true });
-      }
+      } finally { rmSync(parent, { recursive: true, force: true }); }
     })();
-    baselineCache.set(key, pending);
-    pending.catch(() => baselineCache.delete(key));
+    cacheSet(cache, key, pending);
+    pending.catch(() => cache!.delete(key));
   }
   return pending;
 }
@@ -273,11 +270,26 @@ export async function measureBaseline(opts: Pick<GateOptions, "repoDir" | "baseR
  * unchanged base tree — and its symbol graph — is built once, not per edit.
  */
 export async function treeAt(repo: string, ref: string, timeoutMs: number = DEFAULT_COMMAND_TIMEOUT_MS): Promise<Map<string, string>> {
-  const key = `${repo}\0${ref}`;
+  const sha = (await git(repo, ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], timeoutMs)).trim();
+  const key = `${repo}\0${sha}`;
   let pending = baseTreeCache.get(key);
   if (!pending) {
     pending = (async () => {
-      const names = (await git(repo, ["ls-tree", "-r", "--name-only", ref], timeoutMs)).split("\n").filter((f) => isSourceFile(f) && !f.includes("node_modules/"));
+      const names: string[] = [];
+      // Traverse directory entries without ever entering a sealed tree or following a source symlink.
+      const walk = async (directory: string): Promise<void> => {
+        const entries = await git(repo, ["ls-tree", "-z", directory ? `${sha}:${directory}` : sha], timeoutMs);
+        for (const entry of entries.split("\0").filter(Boolean)) {
+          const match = /^(\d+) (\w+) ([a-f0-9]+)\t([\s\S]+)$/.exec(entry);
+          if (!match) continue;
+          const [, mode, kind, , name] = match;
+          const path = directory ? `${directory}/${name}` : name!;
+          if (isSealedPath(path) || name === "node_modules") continue;
+          if (kind === "tree") await walk(path);
+          else if ((mode === "100644" || mode === "100755") && isSourceFile(path)) names.push(path);
+        }
+      };
+      await walk("");
       const out = new Map<string, string>();
       if (names.length) {
         const parent = mkdtempSync(join(tmpdir(), "lc-base-tree-"));
@@ -285,7 +297,7 @@ export async function treeAt(repo: string, ref: string, timeoutMs: number = DEFA
         try {
           mkdirSync(dir, { recursive: true });
           // One batched read for the whole tree: stream `git archive` into `tar`.
-          const shellLine = `git -C ${shellQuote(repo)} archive ${shellQuote(ref)} | tar -x -C ${shellQuote(dir)}`;
+          const shellLine = `git -c core.hooksPath=/dev/null -c core.fsmonitor=false -C ${shellQuote(repo)} archive ${shellQuote(sha)} -- ${names.map(shellQuote).join(" ")} | tar -x -C ${shellQuote(dir)}`;
           try { await execTimed("bash", ["-c", shellLine], repo, timeoutMs); }
           catch (e) { if (e instanceof CommandTimeoutError) throw e; const err = e as { code?: unknown }; throw new Error(`batched base-tree read failed (${shellLine}): exit ${typeof err.code === "number" ? err.code : err.code ?? "unknown"}`); }
           for (const f of names) { const abs = join(dir, f); if (existsSync(abs)) out.set(f, readFileSync(abs, "utf8")); }
@@ -293,7 +305,7 @@ export async function treeAt(repo: string, ref: string, timeoutMs: number = DEFA
       }
       return out;
     })();
-    baseTreeCache.set(key, pending);
+    cacheSet(baseTreeCache, key, pending);
     pending.catch(() => baseTreeCache.delete(key));
   }
   return pending;
@@ -308,10 +320,13 @@ async function worktreeTree(repo: string, baseRef: string, baseFiles: Map<string
   const untracked = (await git(repo, ["ls-files", "--others", "--exclude-standard"], timeoutMs)).split("\n").filter(Boolean);
   const out = new Map(baseFiles);
   for (const f of [...changed, ...untracked]) {
-    if (f.includes("node_modules/")) continue;
+    if (f.includes("node_modules/") || isSealedPath(f)) continue;
     const abs = join(repo, f);
     if (!existsSync(abs)) out.delete(f);
-    else if (isSourceFile(f)) out.set(f, readFileSync(abs, "utf8"));
+    else if (isSourceFile(f)) {
+      if (lstatSync(abs).isSymbolicLink()) throw new Error(`gate refuses a source symlink: ${f}`);
+      out.set(f, readFileSync(abs, "utf8"));
+    }
   }
   return out;
 }
@@ -334,39 +349,39 @@ function testDeletionCheck(diff: string): { passed: boolean; detail: string } {
 }
 
 /** The repo's own command checks (tests/typecheck/lint on touched). Shared by candidate and baseline runs. The three commands run in parallel. */
-async function runCommandChecks(repo: string, relatedTests: string[], commands: ReturnType<typeof repoCommands>, touchedTs: string[], timeoutMs: number = DEFAULT_COMMAND_TIMEOUT_MS): Promise<{ checks: GateCheck[]; exitCodes: GateResult["exitCodes"]; commands: GateResult["commands"]; timedOut: boolean }> {
+async function runCommandChecks(repo: string, relatedTests: string[], commands: ReturnType<typeof repoCommands>, touchedTs: string[], timeoutMs: number = DEFAULT_COMMAND_TIMEOUT_MS, executor: RepositoryExecutor = trustedLocalExecutor, signal?: AbortSignal): Promise<{ checks: GateCheck[]; exitCodes: GateResult["exitCodes"]; commands: GateResult["commands"]; timedOut: boolean }> {
   const checks: GateCheck[] = [];
   const exitCodes: GateResult["exitCodes"] = { tests: null, tsc: null, eslint: null };
   const commandsRun: GateResult["commands"] = {};
-  // Mutating `checks`/`exitCodes` from parallel tasks: safe within the single JS thread as long as every task runs to completion before ordering is fixed below.
   let timedOut = false;
-  const note = (r: TimedResult, cmdline: string) => { if (r.timedOut) { timedOut = true; return `command timed out after ${timeoutMs}ms: ${cmdline}`; } return null; };
-  const shell = (cmdline: string) => run("bash", ["-c", cmdline], repo, timeoutMs);
+  await executor.prepare(repo);
+  const check = async (name: string, field: keyof GateResult["exitCodes"], command: string, args: string[]) => {
+    const displayed = [command, ...args.map(shellQuote)].join(" ");
+    const r = await executor.run({ repoDir: repo, command, args, timeoutMs, signal });
+    exitCodes[field] = r.exitCode;
+    timedOut ||= r.timedOut;
+    checks.push({ name, passed: r.exitCode === 0 && !r.error, detail: r.error ?? `${displayed} exit ${r.exitCode}` });
+  };
   const tasks: Promise<void>[] = [];
   if (!commands.test) {
     checks.push({ name: "related-tests-pass", passed: false, detail: "repository has no test command (package.json scripts.test); cannot verify the edit" });
-  } else if (/\bvitest\b/.test(commands.test)) {
-    commandsRun.tests = `npx vitest run ${relatedTests.join(" ")}`;
-    tasks.push((async () => { const r = await run("npx", ["vitest", "run", ...relatedTests], repo, timeoutMs); exitCodes.tests = r.exitCode; checks.push({ name: "related-tests-pass", passed: r.exitCode === 0, detail: note(r, commandsRun.tests!) ?? `${commandsRun.tests} exit ${r.exitCode}` }); })());
   } else {
-    commandsRun.tests = `${commands.test} ${relatedTests.join(" ")}`.trim();
-    tasks.push((async () => { const r = await shell(commandsRun.tests!); exitCodes.tests = r.exitCode; checks.push({ name: "related-tests-pass", passed: r.exitCode === 0, detail: note(r, commandsRun.tests!) ?? `${commandsRun.tests} exit ${r.exitCode}` }); })());
+    // Execute the repository's actual script. Do not replace a script because it mentions Vitest.
+    // npm forwards argument values as argv; paths never become shell source here.
+    commandsRun.tests = "npm test";
+    tasks.push(check("related-tests-pass", "tests", "npm", ["test", "--", ...relatedTests]));
   }
   if (commands.typecheck) {
     commandsRun.typecheck = commands.typecheck;
-    tasks.push((async () => { const r = await shell(commandsRun.typecheck!); exitCodes.tsc = r.exitCode; checks.push({ name: "tsc-passes", passed: r.exitCode === 0, detail: note(r, commandsRun.typecheck!) ?? `${commandsRun.typecheck} exit ${r.exitCode}` }); })());
-  } else {
-    checks.push({ name: "tsc-passes", passed: true, detail: "no typecheck command and no tsconfig; skipped" });
-  }
+    const script = commands.typecheck === "npm run typecheck" ? "typecheck" : commands.typecheck === "npm run tsc" ? "tsc" : undefined;
+    tasks.push(check("tsc-passes", "tsc", script ? "npm" : "./node_modules/.bin/tsc", script ? ["run", script] : ["--noEmit"]));
+  } else checks.push({ name: "tsc-passes", passed: true, detail: "no typecheck command and no tsconfig; not applicable" });
   const hasEslintConfig = ["eslint.config.mjs", "eslint.config.js", "eslint.config.cjs", ".eslintrc.json", ".eslintrc.js", ".eslintrc.cjs"].some((f) => existsSync(join(repo, f)));
   if (touchedTs.length && (commands.lint || hasEslintConfig)) {
-    commandsRun.lint = commands.lint ?? `npx eslint ${touchedTs.join(" ")}`;
-    tasks.push((async () => { const r = commands.lint ? await shell(`${commands.lint} -- ${touchedTs.join(" ")}`) : await run("npx", ["eslint", ...touchedTs], repo, timeoutMs); exitCodes.eslint = r.exitCode; checks.push({ name: "eslint-touched-passes", passed: r.exitCode === 0, detail: note(r, commandsRun.lint!) ?? `${commandsRun.lint} exit ${r.exitCode} on ${touchedTs.join(", ")}` }); })());
-  } else {
-    checks.push({ name: "eslint-touched-passes", passed: true, detail: touchedTs.length ? "repository has no eslint config/command; skipped" : "no touched source files" });
-  }
+    commandsRun.lint = commands.lint ?? "./node_modules/.bin/eslint";
+    tasks.push(check("eslint-touched-passes", "eslint", commands.lint ? "npm" : "./node_modules/.bin/eslint", commands.lint ? ["run", "lint", "--", ...touchedTs] : touchedTs));
+  } else checks.push({ name: "eslint-touched-passes", passed: true, detail: touchedTs.length ? "repository has no eslint config/command; not applicable" : "no touched source files" });
   await Promise.all(tasks);
-  // Deterministic check order regardless of parallel completion order.
   const order = ["related-tests-pass", "tsc-passes", "eslint-touched-passes"];
   checks.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
   return { checks, exitCodes, commands: commandsRun, timedOut };
@@ -374,6 +389,7 @@ async function runCommandChecks(repo: string, relatedTests: string[], commands: 
 
 export async function evaluateGate(opts: GateOptions): Promise<GateResult> {
   const timeoutMs = opts.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
+  opts = { ...opts, baseRef: (await git(opts.repoDir, ["rev-parse", "--verify", "--end-of-options", `${opts.baseRef}^{commit}`], timeoutMs)).trim() };
   const repo = opts.repoDir;
   const checks: GateCheck[] = [];
   const exitCodes: GateResult["exitCodes"] = { tests: null, tsc: null, eslint: null };
@@ -411,13 +427,12 @@ export async function evaluateGate(opts: GateOptions): Promise<GateResult> {
     for (const fn of bm.functions) changedFunctions.push({ file: f, name: fn.name, before: fn.complexity, after: afterByKey.get(fn.key) ?? 0 });
     for (const fn of am.functions) if (!beforeKeys.has(fn.key)) changedFunctions.push({ file: f, name: fn.name, before: 0, after: fn.complexity });
   }
-  // A surviving function (before>=1) may rise by at most max(+10%, +1):
-  // at complexity 1-2 the pure 10% cap forbids any rise at all.
+  // The contract is a strict ten percent cap, including low-complexity functions.
   let cycOk = true;
   const cycDetails: string[] = [];
   for (const cf of changedFunctions) {
     if (cf.after === 0) continue;
-    const limit = cf.before === 0 ? 1 : Math.max(cf.before * 1.1, cf.before + 1);
+    const limit = cf.before === 0 ? 1 : cf.before * 1.1;
     if (cf.after > limit) { cycOk = false; cycDetails.push(`${cf.file}:${cf.name} ${cf.before} -> ${cf.after} exceeds cap ${limit}`); }
   }
   checks.push({ name: "cyclomatic-not-over-10pct", passed: cycOk, detail: cycDetails.join("; ") || `no changed function rises >10% (sum ${cycBefore} -> ${cycAfter})` });
@@ -477,30 +492,23 @@ export async function evaluateGate(opts: GateOptions): Promise<GateResult> {
   // by at least one named related test. A passing unrelated test + a size
   // drop must never accept an edit (zustand demo case). ---
   const commands = repoCommands(repo);
-  const uncovered = opts.editSet.filter((f) => isSourceFile(f) && !isTestFilePath(f) && !(opts.coverageExempt ?? []).includes(f) && !coveringTests(beforeTree, f).some((t) => opts.relatedTests.some((r) => t === r || t.startsWith(r.endsWith("/") ? r : `${r}/`))));
+  const uncovered = opts.editSet.filter((f) => isSourceFile(f) && !isTestFilePath(f) && !(opts.coverageExempt ?? []).includes(f) && !coveringTests(beforeTree, f, beforeGraph).some((t) => opts.relatedTests.some((r) => t === r || t.startsWith(r.endsWith("/") ? r : `${r}/`))));
   checks.push({ name: "edit-covered-by-related-tests", passed: uncovered.length === 0, detail: uncovered.length ? `no related test imports: ${uncovered.join(", ")}` : "every edited file is imported by a related test" });
 
   // --- commands: the repository's own, or reject. Exit codes are truth.
-  // Baseline first: failures already present on the untouched tree are
-  // repository state, not a rejection of this edit. ---
+  // Baseline is diagnostic only. Any required command failure rejects the candidate. ---
   let baseline: GateBaseline | undefined;
   const commandsRun: GateResult["commands"] = {};
   if (opts.runCommands !== false) {
     // A hanging baseline command ends the run with a timeout reason.
-    baseline = opts.baseline ?? await measureBaseline({ repoDir: opts.repoDir, baseRef: opts.baseRef, relatedTests: opts.relatedTests, commandTimeoutMs: timeoutMs });
-    const ran = await runCommandChecks(repo, opts.relatedTests, commands, touchedTs, timeoutMs);
+    baseline = opts.baseline ?? await measureBaseline({ ...opts, commandTimeoutMs: timeoutMs });
+    const ran = await runCommandChecks(repo, opts.relatedTests, commands, touchedTs, timeoutMs, opts.executor, opts.signal);
     Object.assign(exitCodes, ran.exitCodes);
     Object.assign(commandsRun, ran.commands);
     if (ran.timedOut) {
       checks.push({ name: "command-timeout", passed: false, detail: `a repository command timed out after ${timeoutMs}ms and was stopped; the run ends instead of hanging` });
     }
-    const preExisting = new Set(baseline.preExistingFailures);
-    for (const c of ran.checks) {
-      // A timeout is never a pre-existing failure: it failed this run, now.
-      checks.push(!c.passed && !ran.timedOut && preExisting.has(c.name)
-        ? { name: c.name, passed: true, detail: `${c.detail}; pre-existing baseline failure on the untouched checkout — repository state, not caused by this edit` }
-        : c);
-    }
+    checks.push(...ran.checks);
     // Unconditional repository-state report (not a pass/fail check).
     checks.push({
       name: "baseline-pre-existing-failures",

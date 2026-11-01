@@ -207,11 +207,11 @@ describe("simplify", () => {
       // `applyPlan` is called once per edit and reports per-edit arrays, so splice them back into one continuous log line count.
       expect(JSON.stringify(r.apply.applied)).toContain("inline");
       expect(r.plan.edits).toBe(3);
-      expect(count(/^npx vitest run /)).toBe(2);
+      expect(count(/^npm test /)).toBe(2);
       expect(count(/typecheck/)).toBe(2);
       // Fixture 1 has an eslint config but no lint script, so lint is invoked via `npx eslint <touched>` — exactly twice (baseline + final).
       // Exactly one lint invocation, on the final cumulative run: the baseline worktree is identical to baseRef there, so `git diff` is empty and there is nothing touched to lint. All three commands still ran exactly once on the cumulative edits plus the baseline pass.
-      expect(count(/^npx eslint /)).toBe(1);
+      expect(count(/^node .*eslint/)).toBe(1);
     } finally {
       process.env.PATH = prevPath;
     }

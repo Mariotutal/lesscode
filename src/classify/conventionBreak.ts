@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { findConvention, loadRepositoryConventions } from "./conventions.js";
-import { eslintRuleEnabled, eslintRuleForConvention, applyEslintFix } from "./eslintFix.js";
+import { eslintRuleEnabled, eslintRuleForConvention, applyEslintFix, applyEslintFixAsync, eslintRuleEnabledAsync } from "./eslintFix.js";
 import type { Finding } from "./schema.js";
+
+import type { RepositoryExecutor } from "../execution/index.js";
 
 export type ConventionDecision =
   | { status: "fixable"; finding: Finding; convention: string }
@@ -22,6 +24,7 @@ export function decideConventionBreak(
   checkoutDir: string,
   findings: readonly Finding[],
   registeredInRepo: readonly string[] = loadRepositoryConventions(checkoutDir),
+  executor?: RepositoryExecutor,
 ): ConventionDecision[] {
   const registered = new Set(registeredInRepo);
   return findings.map((finding) => {
@@ -32,7 +35,7 @@ export function decideConventionBreak(
     const convention = findConvention(name, registered);
     const rule = eslintRuleForConvention(name);
     const hasTextRewrite = convention !== undefined && hasEffectiveTextRewrite(name);
-    if (!convention || (!hasTextRewrite && !(rule && eslintRuleEnabled(checkoutDir, finding.file, rule)))) {
+    if (!convention || (!hasTextRewrite && !(rule && eslintRuleEnabled(checkoutDir, finding.file, rule, executor)))) {
       return {
         status: "refused",
         finding,
@@ -45,7 +48,7 @@ export function decideConventionBreak(
     }
     if (!hasTextRewrite) {
       // ESLint-backed fix: fixable iff ESLint actually changes the file.
-      const fixed = applyEslintFix(checkoutDir, finding.file);
+      const fixed = applyEslintFix(checkoutDir, finding.file, executor);
       return fixed !== undefined
         ? { status: "fixable", finding, convention: name }
         : {
@@ -103,15 +106,15 @@ function hasEffectiveTextRewrite(name: string): boolean {
  * points at) instead of a LessCode text rewrite. A raw text rewrite
  * of quotes or semicolons never produces an edit.
  */
-export function applyConventionFix(checkoutDir: string, finding: Finding): string | undefined {
+export function applyConventionFix(checkoutDir: string, finding: Finding, executor?: RepositoryExecutor): string | undefined {
   const registered = new Set(loadRepositoryConventions(checkoutDir));
   const convention = finding.convention ? findConvention(finding.convention, registered) : undefined;
   if (!convention) return undefined;
   const name = finding.convention!;
 
   const rule = eslintRuleForConvention(name);
-  if (rule && eslintRuleEnabled(checkoutDir, finding.file, rule)) {
-    return applyEslintFix(checkoutDir, finding.file);
+  if (rule && eslintRuleEnabled(checkoutDir, finding.file, rule, executor)) {
+    return applyEslintFix(checkoutDir, finding.file, executor);
   }
   if (!hasEffectiveTextRewrite(name)) {
     // No text rewrite exists for this convention (semicolons /
@@ -119,6 +122,12 @@ export function applyConventionFix(checkoutDir: string, finding: Finding): strin
     // than fall back to a raw text rewrite.
     return undefined;
   }
+  return applyTextConventionFix(checkoutDir, finding);
+}
+
+function applyTextConventionFix(checkoutDir: string, finding: Finding): string | undefined {
+  const convention = findConvention(finding.convention ?? "", new Set(loadRepositoryConventions(checkoutDir)));
+  if (!convention) return undefined;
   const lines = readFileSync(join(checkoutDir, finding.file), "utf8").split("\n");
   let changed = false;
   for (const c of finding.citations) {
@@ -132,4 +141,32 @@ export function applyConventionFix(checkoutDir: string, finding: Finding): strin
     }
   }
   return changed ? lines.join("\n") : undefined;
+}
+
+
+export async function decideConventionBreakAsync(checkoutDir: string, findings: readonly Finding[], registeredInRepo: readonly string[] = loadRepositoryConventions(checkoutDir), executor?: RepositoryExecutor): Promise<ConventionDecision[]> {
+  const decisions: ConventionDecision[] = [];
+  for (const finding of findings) {
+    const name = finding.convention;
+    if (!name || !registeredInRepo.includes(name) || hasEffectiveTextRewrite(name)) {
+      decisions.push(...decideConventionBreak(checkoutDir, [finding], registeredInRepo, executor));
+      continue;
+    }
+    const rule = eslintRuleForConvention(name);
+    if (!rule || !await eslintRuleEnabledAsync(checkoutDir, finding.file, rule, executor)) {
+      decisions.push({ status: "refused", finding, reason: `convention "${name}" is registered but its ESLint rule is not enabled or available` });
+      continue;
+    }
+    const fixed = await applyEslintFixAsync(checkoutDir, finding.file, executor);
+    decisions.push(fixed === undefined ? { status: "refused", finding, reason: `ESLint fix for "${name}" does not change ${finding.file}` } : { status: "fixable", finding, convention: name });
+  }
+  return decisions;
+}
+
+export async function applyConventionFixAsync(checkoutDir: string, finding: Finding, executor?: RepositoryExecutor): Promise<string | undefined> {
+  const name = finding.convention;
+  if (!name || !findConvention(name, new Set(loadRepositoryConventions(checkoutDir)))) return undefined;
+  const rule = eslintRuleForConvention(name);
+  if (rule && await eslintRuleEnabledAsync(checkoutDir, finding.file, rule, executor)) return applyEslintFixAsync(checkoutDir, finding.file, executor);
+  return hasEffectiveTextRewrite(name) ? applyTextConventionFix(checkoutDir, finding) : undefined;
 }

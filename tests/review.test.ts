@@ -153,8 +153,9 @@ describe("review", () => {
     expect(r.applied).toBe("");
     expect(r.verdict).toBe("reviewed");
     expect(r.review.items).toHaveLength(1);
-    expect(r.review.items[0]!.text).toMatch(/^Not applied: the gate rejected/);
-    expect(r.review.items[0]!.text).toMatch(/cyclomatic/);
+    expect(r.review.items[0]!.text).toMatch(/^Not applied:/);
+    expect(r.review.items[0]!.ordersEditForFinding).toBeUndefined();
+    expect(r.review.items[0]!.text).not.toMatch(/cyclomatic/);
   }, 300_000);
 
   it("fixture 8: a registry practice is applied; the same practice without a registry is note-only", async () => {
@@ -174,12 +175,11 @@ describe("review", () => {
 
     // Same checkout, same practice, registry removed → note only.
     const unregistered = await materialize("8");
-    await sh(unregistered, "rm", ["lesscode-conventions.json"]);
-    await sh(unregistered, "git", ["add", "-A"]);
+    await sh(unregistered, "git", ["rm", "-f", "--", "lesscode-conventions.json"]);
     await sh(unregistered, "git", ["-c", "user.email=t@l", "-c", "user.name=t", "commit", "-qm", "drop registry"]);
     const b = scripted(spark, wonder);
     const noteRun = await review({ checkout: unregistered, base: "base", intent: ["src/greet.ts"], sparkClient: b.client, wonderClient: b.client });
-    expect(noteRun.verdict).toBe("reviewed");
+    expect(noteRun.verdict, JSON.stringify(noteRun.detail)).toBe("reviewed");
     expect(noteRun.applied).toBe("");
     expect(noteRun.applied).not.toContain("console.log");
     expect(noteRun.review.items.some((i) => i.kind === "practice" && i.text.includes("no-console-log"))).toBe(true);

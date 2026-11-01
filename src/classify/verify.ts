@@ -203,34 +203,117 @@ function declBody(node: ts.Node): ts.Node | undefined {
   return undefined;
 }
 
+/** A checker over the supplied snapshot only. No repository code or filesystem is executed. */
+export function createBindingContext(sources: ReadonlyMap<string, ts.SourceFile>): ts.TypeChecker {
+  const options: ts.CompilerOptions = { target: ts.ScriptTarget.Latest, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, allowJs: true, noLib: true, noEmit: true, types: [] };
+  const key = (file: string): string => file.replace(/^\//, "");
+  const host = ts.createCompilerHost(options);
+  host.getCurrentDirectory = () => "/";
+  host.getSourceFile = (file) => sources.get(key(file));
+  host.fileExists = (file) => sources.has(key(file));
+  host.readFile = (file) => sources.get(key(file))?.text;
+  host.directoryExists = () => true;
+  host.getDirectories = () => [];
+  host.resolveModuleNameLiterals = (literals, from) => literals.map((literal) => {
+    const file = literal.text.startsWith(".") ? resolveSpec(key(from), literal.text, new Set(sources.keys())) : undefined;
+    return { resolvedModule: file ? { resolvedFileName: `/${file}`, extension: file.endsWith(".js") ? ts.Extension.Js : ts.Extension.Ts } : undefined };
+  });
+  return ts.createProgram([...sources.keys()], options, host).getTypeChecker();
+}
+
+/** Stable identity of a free binding; two same-named module locals are deliberately different. */
+export function bindingIdentity(symbol: ts.Symbol | undefined, name: string, checker: ts.TypeChecker): string {
+  if (!symbol) return `global:${name}`;
+  if (symbol.flags & ts.SymbolFlags.Alias) {
+    const aliased = checker.getAliasedSymbol(symbol);
+    if (aliased.declarations?.length) symbol = aliased;
+    else {
+      const declaration = symbol.declarations?.[0];
+      let parent: ts.Node | undefined = declaration;
+      while (parent && !ts.isImportDeclaration(parent)) parent = parent.parent;
+      if (parent && ts.isStringLiteral(parent.moduleSpecifier)) {
+        const imported = declaration && ts.isImportSpecifier(declaration) ? (declaration.propertyName ?? declaration.name).text : declaration && ts.isNamespaceImport(declaration) ? "*" : "default";
+        // Resolution can differ between workspace packages even for the same bare specifier.
+        const spec = parent.moduleSpecifier.text;
+        return `unresolved-import:${parent.getSourceFile().fileName}:${spec}:${imported}`;
+      }
+    }
+  }
+  return (symbol.declarations ?? []).map((d) => `${d.getSourceFile().fileName}:${d.pos}:${d.kind}`).join("|") || `global:${name}`;
+}
+
+function callable(node: ts.Node): ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | undefined {
+  if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node)) return node;
+  if (ts.isVariableDeclaration(node) && node.initializer && (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) return node.initializer;
+  return undefined;
+}
+
 /**
- * Rename-insensitive normalised AST: identifiers are canonicalised by
- * first-appearance order ($0, $1, …), property names and literal values
- * are kept (a different method or constant is a different behaviour),
- * comments/whitespace never appear. Two bodies are equivalent only
- * when their normalised forms match exactly.
+ * Parameters are numbered by declaration position, locals by declaration order,
+ * and free bindings by their actual declaration. Comparing only bodies loses
+ * defaults, async/generator modifiers and the relationship to parameter order.
  */
-export function normalisedAst(node: ts.Node): string {
-  const ids = new Map<string, number>();
-  const canon = (name: string): string => {
-    if (!ids.has(name)) ids.set(name, ids.size);
-    return `$${ids.get(name)}`;
+export function normalisedAst(node: ts.Node, checker?: ts.TypeChecker): string {
+  const root = ts.isBlock(node) && node.parent && callable(node.parent) ? callable(node.parent)! : node;
+  const context = checker ?? createBindingContext(new Map([[root.getSourceFile().fileName, root.getSourceFile()]]));
+  const locals = new Map<ts.Symbol, string>();
+  let nextLocal = 0;
+  const bind = (name: ts.BindingName, prefix: string): void => {
+    if (ts.isIdentifier(name)) {
+      const symbol = context.getSymbolAtLocation(name);
+      if (symbol) locals.set(symbol, prefix);
+    } else name.elements.forEach((element, i) => { if (ts.isBindingElement(element)) bind(element.name, `${prefix}.${i}`); });
   };
+  const fn = callable(root);
+  fn?.parameters.forEach((p, i) => bind(p.name, `parameter:${i}`));
+  const collect = (n: ts.Node): void => {
+    if (n !== root && ts.isFunctionLike(n)) return;
+    if (ts.isVariableDeclaration(n)) bind(n.name, `local:${nextLocal++}`);
+    n.forEachChild(collect);
+  };
+  collect(root);
   const parts: string[] = [];
   const visit = (n: ts.Node): void => {
     if (ts.isIdentifier(n)) {
       const parent = n.parent;
-      if (parent && ts.isPropertyAccessExpression(parent) && parent.name === n) parts.push(`.${n.text}`);
-      else if (parent && (ts.isFunctionDeclaration(parent) || ts.isMethodDeclaration(parent) || ts.isClassDeclaration(parent) || ts.isVariableDeclaration(parent)) && parent.name === n) parts.push("DECL");
-      else parts.push(canon(n.text));
+      const propertyName = parent && ((ts.isPropertyAccessExpression(parent) && parent.name === n) || ((ts.isPropertyAssignment(parent) || ts.isPropertySignature(parent) || ts.isMethodSignature(parent) || ts.isBindingElement(parent)) && parent.name === n && !ts.isBindingElement(parent)) || (ts.isBindingElement(parent) && parent.propertyName === n));
+      if (propertyName) parts.push(`property:${n.text}`);
+      else if (parent === root && "name" in root && root.name === n) parts.push("declaration");
+      else {
+        const symbol = context.getSymbolAtLocation(n);
+        const local = symbol && locals.get(symbol);
+        // Object binding shorthand names are public property keys as well as locals.
+        if (parent && ((ts.isShorthandPropertyAssignment(parent)) || (ts.isBindingElement(parent) && !parent.propertyName && ts.isObjectBindingPattern(parent.parent)))) parts.push(`property:${n.text}`);
+        parts.push(local ?? bindingIdentity(symbol, n.text, context));
+      }
       return;
     }
-    if (ts.isStringLiteral(n) || ts.isNumericLiteral(n)) { parts.push(JSON.stringify(n.text)); return; }
+    if (ts.isStringLiteral(n) || ts.isNumericLiteral(n) || ts.isBigIntLiteral(n) || ts.isRegularExpressionLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n)) {
+      parts.push(`${n.kind}:${JSON.stringify(n.text)}`);
+      return;
+    }
     parts.push(ts.SyntaxKind[n.kind]);
+    if (ts.isVariableDeclarationList(n)) parts.push(`flags:${n.flags & (ts.NodeFlags.Const | ts.NodeFlags.Let)}`);
     n.forEachChild(visit);
   };
-  visit(node);
+  visit(root);
   return parts.join(" ");
+}
+
+/** Refuse duplicate retargets whose full callable contract cannot be matched. */
+export function equivalentHelperReason(duplicate: ts.Node, existing: ts.Node, sources: ReadonlyMap<string, ts.SourceFile>): string | undefined {
+  const a = callable(duplicate), b = callable(existing);
+  if (!a?.body || !b?.body) return "only concrete functions and function-valued declarations are supported";
+  let unsupported: string | undefined;
+  const inspect = (node: ts.Node, root: ts.Node): void => {
+    if (node !== root && (ts.isFunctionLike(node) || ts.isClassLike(node))) { unsupported = "nested functions or classes require a separate equivalence proof"; return; }
+    if (node.kind === ts.SyntaxKind.ThisKeyword || node.kind === ts.SyntaxKind.SuperKeyword || ts.isMetaProperty(node) || (ts.isIdentifier(node) && (node.text === "arguments" || node.text === "eval"))) unsupported = "context-dependent this, arguments, super, new.target or eval is unsupported";
+    node.forEachChild((child) => inspect(child, root));
+  };
+  inspect(a, a); inspect(b, b);
+  if (unsupported) return unsupported;
+  const checker = createBindingContext(sources);
+  return normalisedAst(a, checker) === normalisedAst(b, checker) ? undefined : "callable signatures, parameter bindings, defaults, modifiers, or external bindings differ";
 }
 
 function findNamedDecl(sf: ts.SourceFile, name: string): ts.Node | undefined {
@@ -287,8 +370,9 @@ export function verifyFindings(checkoutDir: string, findings: readonly Finding[]
       const dupBody = declBody(target.decl);
       const helperBody = helper ? declBody(helper) : undefined;
       if (!helper || !dupBody || !helperBody) { drop(finding, `verification: no helper named ${target.name} with a body in ${helperFile}`); continue; }
-      if (normalisedAst(dupBody) !== normalisedAst(helperBody)) {
-        drop(finding, `verification: ${target.name} in ${file} is not equivalent to the existing helper in ${helperFile} under rename-insensitive AST comparison; refusing to retarget`);
+      const mismatch = equivalentHelperReason(target.decl, helper, sources);
+      if (mismatch) {
+        drop(finding, `verification: ${target.name} in ${file} is not equivalent to the existing helper in ${helperFile}: ${mismatch}; refusing to retarget`);
         continue;
       }
     }

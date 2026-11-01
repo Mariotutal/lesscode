@@ -10,5 +10,5 @@ if (handleHelpOrError(args, usage)) process.exit(0);
 try {
   const result = await runPipeline({ checkoutDir: args.values.get("repo")!, baseRef: args.values.get("base")!, gateBaseRef: args.values.get("gate-base")!, intentFiles: args.lists.get("intent") ?? [], relatedTests: args.lists.get("tests")?.length ? args.lists.get("tests")! : ["tests"] });
   console.log(JSON.stringify(result, null, 2));
-  process.exit(exitCodeForVerdict(result.gate?.accepted ? "accepted" : "refused"));
+  process.exit(exitCodeForVerdict(result.verdict));
 } catch (e) { console.error(e instanceof Error ? e.message : String(e)); process.exit(2); }
