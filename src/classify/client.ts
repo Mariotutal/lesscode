@@ -80,11 +80,21 @@ export interface GuestClient {
   }): Promise<ChatCompletionResult>;
 }
 
+/** Transient statuses worth retrying: rate limit and server errors. */
+export function isTransientStatus(status: number): boolean {
+  return status === 429 || (status >= 500 && status <= 599);
+}
+
 export function createGuestClient(opts?: {
   env?: NodeJS.ProcessEnv;
   fetchFn?: FetchLike;
   /** Milliseconds the model request may run before it is aborted; default 300_000. */
   timeoutMs?: number;
+  /** Retries after the first attempt for a transient 429/5xx; default 2. */
+  maxRetries?: number;
+  /** First backoff delay; doubles each retry. Default 500ms. */
+  retryBackoffMs?: number;
+  sleepFn?: (ms: number) => Promise<void>;
 }): GuestClient {
   const config = guestConfig(opts?.env);
   const fetchFn: FetchLike =
@@ -94,6 +104,9 @@ export function createGuestClient(opts?: {
       return { ok: res.ok, status: res.status, text: () => res.text() };
     });
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_MODEL_TIMEOUT_MS;
+  const maxRetries = opts?.maxRetries ?? 2;
+  const retryBackoffMs = opts?.retryBackoffMs ?? 500;
+  const sleep = opts?.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   return {
     config,
     async chat(req) {
@@ -104,28 +117,38 @@ export function createGuestClient(opts?: {
         // tool_choice stays "auto" — never forced (LES-3).
         ...(req.tools ? { tool_choice: req.toolChoice ?? "auto" } : {}),
       };
-      // Timeout: a hanging model request is aborted and the run ends
-      // with a ModelTimeoutError reason instead of hanging forever.
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      let res: Awaited<ReturnType<FetchLike>>;
-      try {
-        res = await fetchFn(`${config.baseUrl}/chat/completions`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${config.apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-      } catch (e) {
-        if (controller.signal.aborted) throw new ModelTimeoutError(timeoutMs);
-        throw e;
-      } finally {
-        clearTimeout(timer);
+      // Timeout (per attempt): a hanging model request is aborted and
+      // the run ends with a ModelTimeoutError instead of hanging.
+      // Retry: a transient 429/5xx is retried at most maxRetries times
+      // with exponential backoff. This is transport retry only — it
+      // does not add a Spark validation retry or a second Wonder plan.
+      let res: Awaited<ReturnType<FetchLike>> | undefined;
+      let raw = "";
+      for (let attempt = 0; ; attempt++) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          res = await fetchFn(`${config.baseUrl}/chat/completions`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${config.apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+        } catch (e) {
+          if (controller.signal.aborted) throw new ModelTimeoutError(timeoutMs);
+          throw e;
+        } finally {
+          clearTimeout(timer);
+        }
+        raw = await res.text();
+        if (res.ok) break;
+        if (!isTransientStatus(res.status) || attempt >= maxRetries) break;
+        await sleep(retryBackoffMs * 2 ** attempt);
       }
-      const raw = await res.text();
+      if (!res) throw new Error("Meta API: no response");
       if (!res.ok) throw new Error(`Meta API ${res.status}: ${raw.slice(0, 500)}`);
       let parsed: unknown;
       try {

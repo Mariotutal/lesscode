@@ -4,6 +4,7 @@ import type { ScopeCreepFinding } from "../classify/scopeCreep.js";
 import { assertFitsWindow, readCheckoutSources } from "../classify/checkout.js";
 import { isSealedPath } from "../classify/evidence.js";
 import { planOutputSchema, wonderOutputSchema, type PlannedEdit, type ReviewNoteItem } from "./schema.js";
+import { hashPrompt } from "../manifest.js";
 
 export const WONDER_MODEL = "muse-wonder-1.0";
 export const PLAN_TOOL = "propose_surgical_patch";
@@ -75,6 +76,7 @@ export interface PlanResult {
   model: string;
   modelCalls: number;
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+  promptHash: string;
   rawOutput: unknown;
 }
 
@@ -134,10 +136,9 @@ export async function planOnce(opts: {
   ).join("\n");
 
   assertFitsWindow("planner", client.config.model, numbered.length + findingsText.length + 2000);
-  const result = await client.chat({
-    messages: [
+  const planMessages = [
       {
-        role: "system",
+        role: "system" as const,
         content: [
           "You are the LessCode planner (muse-wonder-1.0). You plan ONCE. Choose which findings become surgical edits; do not reimplement the feature.",
           "A single-use forward is an inline, not an essay: the surviving caller calls the underlying operation directly and the wrapper file is deleted.",
@@ -150,8 +151,11 @@ export async function planOnce(opts: {
           "Never edit tests. Never touch sealed paths (none are shown).",
         ].join("\n"),
       },
-      { role: "user", content: `Findings:\n${findingsText}\n\nDiff of the change (the change under review):\n\n${diffText || "(no diff available)"}\n\nSurrounding files as context (numbered lines):\n\n${numbered}` },
-    ],
+      { role: "user" as const, content: `Findings:\n${findingsText}\n\nDiff of the change (the change under review):\n\n${diffText || "(no diff available)"}\n\nSurrounding files as context (numbered lines):\n\n${numbered}` },
+  ];
+  const promptHash = hashPrompt(planMessages);
+  const result = await client.chat({
+    messages: planMessages,
     tools: [PLAN_TOOL_DEF],
     toolChoice: "auto",
   });
@@ -166,7 +170,7 @@ export async function planOnce(opts: {
   const skipped: PlanResult["skipped"] = [];
   if (!parsedData) {
     // One plan only. An invalid plan becomes no edits, never a second call.
-    return { edits: [], review: [], skipped: opts.findings.map((_, i) => ({ findingIndex: i, reason: "plan failed schema validation" })), model: client.config.model, modelCalls: 1, usage: result.usage, rawOutput: raw };
+    return { edits: [], review: [], skipped: opts.findings.map((_, i) => ({ findingIndex: i, reason: "plan failed schema validation" })), model: client.config.model, modelCalls: 1, usage: result.usage, promptHash, rawOutput: raw };
   }
   const parsed = { data: parsedData };
 
@@ -220,5 +224,5 @@ export async function planOnce(opts: {
     edits.push(edit);
   }
   opts.findings.forEach((_, i) => { if (!seen.has(i)) skipped.push({ findingIndex: i, reason: "planner made no decision for this finding" }); });
-  return { edits, review: parsed.data.review, skipped, model: client.config.model, modelCalls: 1, usage: result.usage, rawOutput: raw };
+  return { edits, review: parsed.data.review, skipped, model: client.config.model, modelCalls: 1, usage: result.usage, promptHash, rawOutput: raw };
 }
