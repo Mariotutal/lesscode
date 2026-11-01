@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { buildSymbolGraph } from "./symbolGraph.js";
+import ts from "typescript";
+import { buildSymbolGraph, transitiveImports } from "./symbolGraph.js";
 import { measureSource } from "./metrics.js";
 import { isSourceFile } from "../classify/checkout.js";
 
@@ -108,27 +109,44 @@ export function isTestFilePath(f: string): boolean {
  * make every legitimate inline look uncovered.
  */
 export function coveringTests(tree: Map<string, string>, file: string): string[] {
-  const allFiles = [...tree.keys()];
-  const resolve = (from: string, spec: string): string | undefined => {
-    const parts: string[] = [];
-    for (const seg of `${from.split("/").slice(0, -1).join("/")}/${spec}`.split("/")) {
-      if (seg === "..") parts.pop(); else if (seg !== "." && seg !== "") parts.push(seg);
-    }
-    const stem = parts.join("/").replace(/\.[cm]?[jt]sx?$/, "");
-    for (const cand of [parts.join("/"), ...[".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"].flatMap((e) => [`${stem}${e}`, `${stem}/index${e}`])]) if (allFiles.includes(cand)) return cand;
-    return undefined;
-  };
-  const importsOf = new Map<string, string[]>();
-  for (const f of allFiles) {
-    const text = tree.get(f)!;
-    importsOf.set(f, [...text.matchAll(/(?:from|import|require)\s*\(\s*["']([^"']+)["']|(?:from|import)\s+["']([^"']+)["']/g)].map((m) => m[1] ?? m[2]!).filter((s) => s.startsWith(".")).map((s) => resolve(f, s)).filter((x): x is string => Boolean(x)));
+  // Importer/reachability questions go to the checker-resolved
+  // symbol graph (LES-29), not a regex over specifiers. One gap:
+  // the graph's program does not resolve CommonJS `require()`
+  // targets, and LES-31 requires coverage through them (a root
+  // test.js requiring the change). Those edges are added from the
+  // parsed AST — still checker-set files, resolved by the graph's
+  // own file set — before asking the graph who reaches `file`.
+  const graph = buildSymbolGraph(tree);
+  for (const [f, text] of tree) {
+    const entry = graph.get(f);
+    if (!entry) continue;
+    const sf = ts.createSourceFile(f, text, ts.ScriptTarget.Latest, true);
+    const visit = (node: ts.Node): void => {
+      if (isRequireCall(node)) {
+        const target = resolveRequireTarget(f, node, tree);
+        if (target && target !== f) entry.importedFiles.add(target);
+      }
+      node.forEachChild(visit);
+    };
+    visit(sf);
   }
-  const reaches = (start: string): boolean => {
-    const seen = new Set<string>(); const stack = [start];
-    while (stack.length) { const cur = stack.pop()!; if (cur === file) return true; if (seen.has(cur)) continue; seen.add(cur); stack.push(...(importsOf.get(cur) ?? [])); }
-    return false;
-  };
-  return allFiles.filter((f) => isTestFilePath(f) && reaches(f));
+  return [...tree.keys()].filter((f) => isTestFilePath(f) && (f === file || transitiveImports(graph, f).has(file)));
+}
+
+// Minimal AST helpers for the require() edges above (kept local:
+// the graph deliberately stays import/export-only).
+function isRequireCall(node: ts.Node): node is ts.CallExpression {
+  return ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "require" && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0]!) && node.arguments[0]!.text.startsWith(".");
+}
+function resolveRequireTarget(fromFile: string, node: ts.CallExpression, tree: Map<string, string>): string | undefined {
+  const spec = (node.arguments[0] as ts.StringLiteral).text;
+  const parts: string[] = [];
+  for (const seg of `${fromFile.split("/").slice(0, -1).join("/")}/${spec}`.split("/")) {
+    if (seg === "..") parts.pop(); else if (seg !== "." && seg !== "") parts.push(seg);
+  }
+  const stem = parts.join("/").replace(/\.[cm]?[jt]sx?$/, "");
+  for (const cand of [parts.join("/"), ...[".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"].flatMap((e) => [`${stem}${e}`, `${stem}/index${e}`])]) if (tree.has(cand)) return cand;
+  return undefined;
 }
 
 export interface GateOptions {

@@ -5,6 +5,7 @@ import { assertFitsWindow, readCheckoutSources } from "../classify/checkout.js";
 import { isSealedPath } from "../classify/evidence.js";
 import { planOutputSchema, wonderOutputSchema, type PlannedEdit, type ReviewNoteItem } from "./schema.js";
 import { hashPrompt } from "../manifest.js";
+import { buildSymbolGraph, importersOf } from "../gate/symbolGraph.js";
 
 export const WONDER_MODEL = "muse-wonder-1.0";
 export const PLAN_TOOL = "propose_surgical_patch";
@@ -178,21 +179,10 @@ export async function planOnce(opts: {
   // files, the existing helper (retarget), and every file that imports
   // the finding's file — those importers are its call sites, which the
   // classifier may not cite even though the edit must rewrite them.
-  const importersOf = (target: string): string[] => {
-    const stem = target.replace(/\.[cm]?[jt]sx?$/, "");
-    return sources.filter((s) => {
-      if (s.file === target) return false;
-      return [...s.text.matchAll(/from\s+["']([^"']+)["']/g)].some((m) => {
-        const spec = m[1]!;
-        if (!spec.startsWith(".")) return false;
-        const parts: string[] = [];
-        for (const seg of `${s.file.split("/").slice(0, -1).join("/")}/${spec}`.split("/")) {
-          if (seg === "..") parts.pop(); else if (seg !== "." && seg !== "") parts.push(seg);
-        }
-        return parts.join("/").replace(/\.[cm]?[jt]sx?$/, "") === stem;
-      });
-    }).map((s) => s.file);
-  };
+  // Importer questions go to the checker-resolved symbol graph
+  // (LES-29): it credits only the file a specifier actually
+  // resolves to, where a regex over `from "..."` cannot.
+  const graph = buildSymbolGraph(new Map(sources.map((s) => [s.file, s.text])));
 
   const edits: PlannedEdit[] = [];
   const seen = new Set<number>();
@@ -205,7 +195,7 @@ export async function planOnce(opts: {
       skipped.push({ findingIndex: edit.findingIndex, reason: `action ${edit.action} does not match category ${finding.category}` });
       continue;
     }
-    const allowed = new Set([finding.file, ...finding.citations.map((c) => c.file), ...importersOf(finding.file),
+    const allowed = new Set([finding.file, ...finding.citations.map((c) => c.file), ...importersOf(graph, finding.file),
       ...(finding.category === "duplicate-helper" && finding.existingHelperFile ? [finding.existingHelperFile] : [])]);
     const paths = [...edit.newFiles.map((f) => f.file), ...edit.deleteFiles];
     if (paths.some((p) => isSealedPath(p) || /(^|\/)tests?\//.test(p) || /\.test\.ts$/.test(p))) {

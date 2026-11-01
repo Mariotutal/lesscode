@@ -8,6 +8,8 @@ export interface FileSymbols {
   referencedByOthers: Set<string>;
   /** names imported by this file, by resolved target name */
   imports: Set<string>;
+  /** repo-relative files this file imports from (resolved, in-set only) */
+  importedFiles: Set<string>;
 }
 
 function exportedDeclarations(sf: ts.SourceFile): Map<string, string> {
@@ -129,14 +131,14 @@ export function buildSymbolGraph(files: Map<string, string>): Map<string, FileSy
     const key = keyFor(sf.fileName);
     if (key === undefined || sourceByKey.has(key)) continue;
     sourceByKey.set(key, sf);
-    graph.set(key, { file: key, exports: exportedDeclarations(sf), referencedByOthers: new Set(), imports: new Set() });
+    graph.set(key, { file: key, exports: exportedDeclarations(sf), referencedByOthers: new Set(), imports: new Set(), importedFiles: new Set() });
   }
   // Files the program somehow skipped must still appear in the graph.
   for (const [key, src] of files) {
     if (graph.has(key)) continue;
     const sf = ts.createSourceFile(fileNameByKey.get(key)!, src, ts.ScriptTarget.Latest, true);
     sourceByKey.set(key, sf);
-    graph.set(key, { file: key, exports: exportedDeclarations(sf), referencedByOthers: new Set(), imports: new Set() });
+    graph.set(key, { file: key, exports: exportedDeclarations(sf), referencedByOthers: new Set(), imports: new Set(), importedFiles: new Set() });
   }
 
   /** Credit the file that actually declares the symbol at `id`, if it is in the set and not `fromFile`. */
@@ -159,8 +161,16 @@ export function buildSymbolGraph(files: Map<string, string>): Map<string, FileSy
 
   for (const [file, sf] of sourceByKey) {
     const imported = new Set<string>();
+    const importedFiles = graph.get(file)!.importedFiles;
     const visit = (node: ts.Node): void => {
       if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+        // Record the checker-resolved target file (same resolution
+        // that credits referencedByOthers), if it is in the set.
+        const moduleSym = checker.getSymbolAtLocation(node.moduleSpecifier);
+        for (const decl of moduleSym?.declarations ?? []) {
+          const defFile = keyFor(decl.getSourceFile().fileName);
+          if (defFile !== undefined && defFile !== file) importedFiles.add(defFile);
+        }
         // Named bindings live under importClause.namedBindings (import) or
         // the ExportDeclaration's own exportClause (re-export).
         const bindings: ts.Node | undefined = ts.isImportDeclaration(node) ? node.importClause : node.exportClause;
@@ -199,4 +209,27 @@ export function buildSymbolGraph(files: Map<string, string>): Map<string, FileSy
     graph.get(file)!.imports = imported;
   }
   return graph;
+}
+
+/**
+ * The one importers-of-a-file computation (LES-29): every file in
+ * the graph whose imports the checker resolved onto `target`.
+ * Callers that previously regex-scanned import specifiers (planner
+ * allowed-set, gate test-coverage) ask this instead.
+ */
+export function importersOf(graph: Map<string, FileSymbols>, target: string): string[] {
+  return [...graph.values()].filter((s) => s.file !== target && s.importedFiles.has(target)).map((s) => s.file);
+}
+
+/** Files `file` transitively imports within the graph (cycle-safe; excludes `file` itself). */
+export function transitiveImports(graph: Map<string, FileSymbols>, file: string): Set<string> {
+  const out = new Set<string>();
+  const stack = [...(graph.get(file)?.importedFiles ?? [])];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (cur === file || out.has(cur)) continue;
+    out.add(cur);
+    stack.push(...(graph.get(cur)?.importedFiles ?? []));
+  }
+  return out;
 }
