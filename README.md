@@ -230,9 +230,32 @@ and splits the result into the two posts:
 never applies it, never modifies the pull-request branch, and never
 merges.
 
+## Posting to GitHub (LES-28)
+
+`src/pr/github.ts` is the hosting layer `src/pr/pr.ts` left to the
+caller. `runGithubPrReview({ api, owner, repo, prNumber, checkout,
+offer })` reads the PR head via the (injectable) GitHub API, resolves
+base+intent from the checkout's `lesscode-pr.json`, runs `review()`
+exactly once, then: creates or updates the one Check Run named
+`lesscode/review` (body is the gate JSON, conclusion from the gate
+alone — the only thing here that can satisfy branch protection);
+creates or updates the one comment marked `<!-- lesscode:review-note -->`
+whose body (past the marker) is exactly the senior note; and offers
+the accepted patch as the caller chooses — `--offer branch` commits
+it to a new `lesscode/suggestions-pr-<n>` branch from a scratch
+worktree, `--offer suggestions` posts it as review suggestions,
+`--offer none` returns the patch text. It never applies the patch to
+the PR branch and never merges. `tests/github.test.ts` drives it
+with a scripted model against an in-memory stubbed GitHub API (a
+local bare repo stands in for the push target) — nothing is posted
+to the real repository. All command adapters now share
+`src/cli/args.ts` (one parser, `--help` per command, exit codes
+0 accepted / 1 refused or reviewed / 2 run failure).
+
 ```bash
 npm run pr-review -- --repo <dir> [--result <file>]   # thin CLI adapter: prints { check, comment }
-npm test   # tests/pr.test.ts drives the caller with a scripted model
+GITHUB_TOKEN=... npm run github-pr-review -- --owner <o> --repo-name <r> --pr <n> --checkout <dir> [--offer branch|suggestions|none]
+npm test   # tests/pr.test.ts + tests/github.test.ts, scripted models only
 ```
 
 Proofs (`tests/pr.test.ts`, scripted Spark+Wonder, no live model,
