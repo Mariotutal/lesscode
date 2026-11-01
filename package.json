@@ -14,14 +14,16 @@
     "test": "vitest run tests",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
-    "github-pr-review": "tsx src/pr/githubCli.ts"
+    "github-pr-review": "tsx src/pr/githubCli.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "service": "tsx src/service/cli.ts",
+    "start": "node dist/service/cli.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
     "@types/node": "^22.20.5",
     "eslint": "^9.39.0",
     "tsx": "^4.20.0",
-    "typescript": "^5.8.0",
     "typescript-eslint": "^8.0.0",
     "vitest": "^3.2.0"
   },
@@ -31,5 +33,12 @@
   },
   "allowScripts": {
     "esbuild@0.28.2": true
+  },
+  "main": "./dist/engine/index.js",
+  "types": "./dist/engine/index.d.ts",
+  "exports": {
+    ".": "./dist/engine/index.js",
+    "./execution": "./dist/execution/index.js",
+    "./source": "./dist/source/index.js"
   }
 }

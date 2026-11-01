@@ -1,7 +1,8 @@
 import ts from "typescript";
 import { isSourceFile, readCheckoutSources } from "../classify/checkout.js";
 import { isSealedPath, normaliseRepoPath } from "../classify/evidence.js";
-import { parse, type CitedTarget } from "../classify/target.js";
+import { declName, parse, topLevelDecls, type CitedTarget } from "../classify/target.js";
+import { bindingIdentity, createBindingContext, equivalentHelperReason } from "../classify/verify.js";
 
 /**
  * AST codemods (LES-21). Wonder still chooses the action per finding
@@ -56,7 +57,7 @@ export function applyReplacements(text: string, replacements: TextReplacement[])
  * Only blank runs left by deletions are collapsed.
  */
 export function finishText(text: string): string {
-  return text.replace(/\n{3,}/g, "\n\n").replace(/\s+$/, "\n");
+  return text.endsWith("\n") ? text : `${text}\n`;
 }
 
 /** Sources of the checkout as parsed ASTs (never sealed paths; tests included — never scan tests). */
@@ -113,6 +114,42 @@ function specifiersFor(sources: FileSources, file: string, targetFile: string): 
 // retarget
 // ---------------------------------------------------------------------------
 
+/** Semantic refusal is separate from application or gate failure. */
+export function retargetSafetyReason(duplicate: { name: string; file: string }, existingHelperFile: string, sources: FileSources): string | undefined {
+  const duplicateSource = sources.get(duplicate.file)?.sf, existingSource = sources.get(existingHelperFile)?.sf;
+  if (!duplicateSource || !existingSource || duplicate.file === existingHelperFile) return "duplicate and existing helper must name different readable modules";
+  const a = topLevelDecls(duplicateSource).find((node) => declName(node) === duplicate.name);
+  const b = topLevelDecls(existingSource).find((node) => declName(node) === duplicate.name);
+  if (!a || !b) return "both modules must declare the same named helper";
+  const mismatch = equivalentHelperReason(a, b, new Map([...sources].map(([file, value]) => [file, value.sf])));
+  if (mismatch) return `helpers are not equivalent: ${mismatch}`;
+  for (const [sf, target] of [[duplicateSource, a], [existingSource, b]] as const) {
+    for (const statement of sf.statements) {
+      if (statement === target || ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) continue;
+      if (ts.isVariableStatement(statement) && statement.declarationList.declarations.length === 1 && statement.declarationList.declarations[0] === target) continue;
+      if (ts.isImportDeclaration(statement) && statement.importClause?.isTypeOnly) continue;
+      return "retargeting modules with additional runtime declarations or imports requires a module-effect proof";
+    }
+  }
+  let unsupported: string | undefined;
+  for (const [file, entry] of sources) {
+    const scan = (node: ts.Node): void => {
+      if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier) && resolveFrom(file, node.moduleSpecifier.text, sources) === duplicate.file) {
+        if (!ts.isImportDeclaration(node) || !node.importClause) unsupported = "re-exports or side-effect-only imports cannot be retargeted";
+        else {
+          const clause = node.importClause;
+          if (clause.namedBindings && (!ts.isNamedImports(clause.namedBindings) || clause.namedBindings.elements.some((el) => (el.propertyName ?? el.name).text !== duplicate.name))) unsupported = "namespace or mixed-name imports cannot be retargeted by changing a module specifier";
+          if (clause.name && !(ts.canHaveModifiers(a) && ts.getModifiers(a)?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword))) unsupported = "a default import does not bind the named helper";
+        }
+      }
+      if (ts.isCallExpression(node) && node.arguments[0] && ts.isStringLiteral(node.arguments[0]) && resolveFrom(file, node.arguments[0].text, sources) === duplicate.file) unsupported = "dynamic imports or require references cannot be retargeted";
+      node.forEachChild(scan);
+    };
+    scan(entry.sf);
+  }
+  return unsupported;
+}
+
 /**
  * Every importer of the duplicate helper imports the named helper from
  * `existingHelperFile` instead, and the duplicate is deleted. The
@@ -123,6 +160,7 @@ export function retargetCodemod(
   existingHelperFile: string,
   sources: FileSources,
 ): CodemodResult | undefined {
+  if (retargetSafetyReason(duplicate, existingHelperFile, sources)) return undefined;
   const newFiles: { file: string; content: string }[] = [];
   for (const [file, entry] of sources) {
     if (file === duplicate.file) continue;
@@ -155,7 +193,7 @@ export function retargetCodemod(
 
 interface Member {
   name: string;
-  forwarded: ts.CallExpression | ts.NewExpression;
+  forwarded: ts.Expression;
   params: string[];
   ctorParam?: string;
   /** Multi-statement body inlined verbatim (variable bindings + return) when the single call site sits in a statement. */
@@ -170,6 +208,7 @@ interface Site {
   ctorDep?: ts.Node;
   /** Call args of the method/function invocation. */
   args: readonly ts.Expression[];
+  ctorArgs?: readonly ts.Node[];
 }
 
 /** Local names in `sf` that bind `name` imported from `targetFile`. */
@@ -270,7 +309,9 @@ function resolveCtorArgs(sf: ts.SourceFile, obj: ts.Node, bindings: Set<string>)
       // by the caller treating this file as the site file.
       node.forEachChild(visit);
     };
-    visit(sf);
+    let owner: ts.Node | undefined = obj;
+    while (owner && !ts.isClassDeclaration(owner)) owner = owner.parent;
+    if (owner) visit(owner);
     return found ? { ctorDep: found[0], ctorArgs: found } : undefined;
   }
   if (ts.isIdentifier(obj)) {
@@ -304,7 +345,7 @@ function resolveCtorArgs(sf: ts.SourceFile, obj: ts.Node, bindings: Set<string>)
  */
 interface ForwardResolution {
   text: string;
-  neededImport?: { local: string; from: string };
+  neededImport?: { local: string; imported: string; from: string };
   /** Ctor params rendered as `this.<name>` inside the dep, needing promotion to parameter properties. */
   thisDeps: string[];
   /** For multi-statement bodies: binding statements then the final expression, to splice at the call site. */
@@ -321,8 +362,10 @@ function resolveForward(
   sources: FileSources,
 ): ForwardResolution | undefined {
   const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
-  const printIn = (n: ts.Node, sf: ts.SourceFile): string =>
-    printer.printNode(ts.EmitHint.Unspecified, n, sf).replace(/\s+/g, " ").trim();
+  const argumentText = (n: ts.Node, sf: ts.SourceFile): string => {
+    const text = printer.printNode(ts.EmitHint.Unspecified, n, sf);
+    return ts.isBinaryExpression(n) || ts.isConditionalExpression(n) || ts.isCommaListExpression(n) ? `(${text})` : text;
+  };
 
   const paramMap = new Map<string, ts.Expression>();
   member.params.forEach((p, i) => {
@@ -330,8 +373,8 @@ function resolveForward(
     if (arg) paramMap.set(p, arg);
   });
 
-  let neededImport: { local: string; from: string } | undefined;
-  let callee: ts.Node | undefined = (member.forwarded as ts.CallExpression).expression;
+  let neededImport: { local: string; imported: string; from: string } | undefined;
+  let callee: ts.Node | undefined = ts.isCallExpression(member.forwarded) || ts.isNewExpression(member.forwarded) ? member.forwarded.expression : undefined;
   while (callee && (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee))) callee = callee.expression;
   if (callee && ts.isIdentifier(callee)) {
     // Is the callee imported into the wrapper file from another file?
@@ -342,15 +385,21 @@ function resolveForward(
       const binds = (local: string): boolean =>
         local === (callee as ts.Identifier).text && !!targetFile && targetFile !== wrapperFile;
       if (clause?.name && binds(clause.name.text)) {
-        neededImport = { local: (callee as ts.Identifier).text, from: targetFile! };
+        neededImport = { local: (callee as ts.Identifier).text, imported: "default", from: targetFile! };
       }
       if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
         for (const el of clause.namedBindings.elements) {
-          if (binds(el.name.text)) neededImport = { local: el.name.text, from: targetFile! };
+          if (binds(el.name.text)) neededImport = { local: el.name.text, imported: (el.propertyName ?? el.name).text, from: targetFile! };
         }
       }
     }
   }
+
+  if (neededImport && (wrapperSf === siteSf || siteSf.statements.some((statement) => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || resolveFrom(siteSf.fileName, statement.moduleSpecifier.text, sources) !== neededImport!.from) return false;
+    const clause = statement.importClause;
+    return neededImport!.imported === "default" ? clause?.name?.text === neededImport!.local : !!clause?.namedBindings && ts.isNamedImports(clause.namedBindings) && clause.namedBindings.elements.some((el) => el.name.text === neededImport!.local && (el.propertyName ?? el.name).text === neededImport!.imported);
+  }))) neededImport = undefined;
 
   const text0 = member.forwarded.getText(wrapperSf);
   const base = member.forwarded.getStart(wrapperSf);
@@ -383,7 +432,8 @@ function resolveForward(
     visitDep(ctorDep);
     ctorText = applyReplacements(ctorDep.getText(siteSf), depReps);
     if (ctorText === undefined) return undefined;
-    ctorText = ctorText.replace(/\s+/g, " ").trim();
+    if (ts.isBinaryExpression(ctorDep) || ts.isConditionalExpression(ctorDep) || ts.isArrowFunction(ctorDep) || ts.isFunctionExpression(ctorDep)) ctorText = `(${ctorText})`;
+
   }
   const visit = (node: ts.Node): void => {
     if (ctorText !== undefined && ts.isPropertyAccessExpression(node) && node.expression.kind === ts.SyntaxKind.ThisKeyword && node.name.text === member.ctorParam) {
@@ -392,9 +442,10 @@ function resolveForward(
     }
     if (ts.isIdentifier(node)) {
       const parent = node.parent;
-      const isPropName = parent && ts.isPropertyAccessExpression(parent) && parent.name === node;
-      if (!isPropName && paramMap.has(node.text)) {
-        reps.push({ start: node.getStart(wrapperSf) - base, end: node.getEnd() - base, text: printIn(paramMap.get(node.text)!, siteSf) });
+      const isPropName = parent && ((ts.isPropertyAccessExpression(parent) && parent.name === node) || (ts.isPropertyAssignment(parent) && parent.name === node));
+      if (!isPropName && !isTypePosition(node) && paramMap.has(node.text)) {
+        const value = argumentText(paramMap.get(node.text)!, siteSf);
+        reps.push({ start: node.getStart(wrapperSf) - base, end: node.getEnd() - base, text: parent && ts.isShorthandPropertyAssignment(parent) ? `${node.text}: ${value}` : value });
         return;
       }
     }
@@ -415,10 +466,11 @@ function resolveForward(
     const sVisit = (node: ts.Node): void => {
       if (ts.isIdentifier(node)) {
         const parent = node.parent;
-        const isPropName = parent && ts.isPropertyAccessExpression(parent) && parent.name === node;
+        const isPropName = parent && ((ts.isPropertyAccessExpression(parent) && parent.name === node) || (ts.isPropertyAssignment(parent) && parent.name === node));
         const isDeclName = parent && ts.isVariableDeclaration(parent) && parent.name === node;
-        if (!isPropName && !isDeclName && paramMap.has(node.text)) {
-          sReps.push({ start: node.getStart(wrapperSf) - sBase, end: node.getEnd() - sBase, text: printIn(paramMap.get(node.text)!, siteSf) });
+        if (!isPropName && !isDeclName && !isTypePosition(node) && paramMap.has(node.text)) {
+          const value = argumentText(paramMap.get(node.text)!, siteSf);
+          sReps.push({ start: node.getStart(wrapperSf) - sBase, end: node.getEnd() - sBase, text: parent && ts.isShorthandPropertyAssignment(parent) ? `${node.text}: ${value}` : value });
           return;
         }
       }
@@ -427,7 +479,7 @@ function resolveForward(
     sVisit(stmt);
     const out = applyReplacements(sText, sReps);
     if (out === undefined) return undefined;
-    expanded.push(out.replace(/\s+/g, " ").trim());
+    expanded.push(out);
   }
   return { text, neededImport, thisDeps, bodyText: expanded };
 }
@@ -438,7 +490,7 @@ function resolveForward(
  * and a constructor left empty by that removal. Returns the cleaned
  * text, or undefined when the field is still used elsewhere.
  */
-function eraseStoredWrapper(text: string, file: string, keepCtorFor: string[] = []): string | undefined {
+function eraseStoredWrapper(text: string, file: string, targetField: string, keepCtorFor: string[] = []): string | undefined {
   const sf = parse(file, text);
   let field: string | undefined;
   // Any remaining `this.<field>` read other than through the replaced
@@ -476,7 +528,8 @@ function eraseStoredWrapper(text: string, file: string, keepCtorFor: string[] = 
 
   const reps: TextReplacement[] = [];
   for (const [name, assign] of assignments) {
-    if ((counts.get(name) ?? 0) > 1) continue; // still read elsewhere
+    if (name !== targetField) continue;
+    if ((counts.get(name) ?? 0) > 1) return undefined; // another read would keep the instance alive
     field = name;
     // A constructor whose only statement was this assignment is now
     // empty: erase it whole (that also erases the assignment inside
@@ -510,7 +563,7 @@ function eraseStoredWrapper(text: string, file: string, keepCtorFor: string[] = 
   }
   if (!field) return text;
   const out = applyReplacements(text, reps);
-  return out === undefined ? undefined : out.replace(/\n{3,}/g, "\n\n");
+  return out;
 }
 
 /** Exported top-level names of a file. */
@@ -527,6 +580,327 @@ function exportedNames(sf: ts.SourceFile): string[] {
   return names;
 }
 
+interface InlineAnalysis {
+  callSites: { site: Site; member: Member }[];
+}
+
+function enclosingFunction(node: ts.Node): ts.Node | undefined {
+  for (let parent = node.parent; parent; parent = parent.parent) if (ts.isFunctionLike(parent)) return parent;
+  return undefined;
+}
+
+function parameterReason(parameters: readonly ts.ParameterDeclaration[]): string | undefined {
+  if (parameters.some((p) => !ts.isIdentifier(p.name) || p.initializer || p.dotDotDotToken || p.questionToken || p.name.getText() === "this" || ts.getDecorators(p)?.length)) {
+    return "default, optional, rest, destructured, this, or decorated parameters need a separate argument-binding transform";
+  }
+  return undefined;
+}
+
+function transparentClassReason(decl: ts.ClassDeclaration): string | undefined {
+  if (decl.heritageClauses?.length || ts.getDecorators(decl)?.length) return "inherited or decorated constructors are not transparent";
+  for (const member of decl.members) {
+    if (ts.isConstructorDeclaration(member)) {
+      if (member.body?.statements.length || parameterReason(member.parameters)) return "constructor effects or nontrivial parameter initialization would be removed";
+    } else if (!ts.isMethodDeclaration(member) || member.modifiers?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword) || ts.getDecorators(member)?.length) {
+      return "class fields, accessors, static members, or decorators are not transparent";
+    } else {
+      const only = member.body?.statements.length === 1 ? member.body.statements[0] : undefined;
+      if (!only || !ts.isReturnStatement(only) || !only.expression || (!ts.isCallExpression(only.expression) && !ts.isNewExpression(only.expression))) return "dependency methods must be transparent forwards";
+      let mutates = false;
+      const scan = (n: ts.Node): void => {
+        if ((ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment) || ts.isPostfixUnaryExpression(n) || (ts.isPrefixUnaryExpression(n) && [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(n.operator))) mutates = true;
+        n.forEachChild(scan);
+      };
+      scan(only.expression);
+      if (mutates) return "dependency methods mutate state";
+    }
+  }
+  return undefined;
+}
+
+/** A stable local value can be read again without triggering getters, coercion or mutation. */
+function stableArgument(node: ts.Expression, site: ts.Node, checker: ts.TypeChecker): boolean {
+  if (ts.isParenthesizedExpression(node)) return stableArgument(node.expression, site, checker);
+  if (ts.isLiteralExpression(node) && !ts.isRegularExpressionLiteral(node)) return true;
+  if ([ts.SyntaxKind.NullKeyword, ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword].includes(node.kind)) return true;
+  if (ts.isPrefixUnaryExpression(node) && [ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken, ts.SyntaxKind.TildeToken].includes(node.operator)) return ts.isNumericLiteral(node.operand);
+  if (ts.isBinaryExpression(node)) {
+    const numeric = (n: ts.Expression): boolean => ts.isNumericLiteral(n) || (ts.isParenthesizedExpression(n) && numeric(n.expression)) || (ts.isBinaryExpression(n) && numeric(n.left) && numeric(n.right));
+    return numeric(node) && ![ts.SyntaxKind.EqualsToken, ts.SyntaxKind.CommaToken, ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(node.operatorToken.kind);
+  }
+  if (ts.isPropertyAccessExpression(node) && node.expression.kind === ts.SyntaxKind.ThisKeyword) {
+    const property = checker.getSymbolAtLocation(node.name)?.valueDeclaration;
+    return !!property && ts.isParameter(property) && !!property.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword);
+  }
+  if (!ts.isIdentifier(node)) return false;
+  const symbol = checker.getSymbolAtLocation(node);
+  const declaration = symbol?.valueDeclaration;
+  if (!declaration || enclosingFunction(declaration) !== enclosingFunction(site)) return false;
+  if (ts.isVariableDeclaration(declaration)) {
+    if (!ts.isVariableDeclarationList(declaration.parent) || !(declaration.parent.flags & ts.NodeFlags.Const) || declaration.getStart() > site.getStart()) return false;
+  } else if (!ts.isParameter(declaration)) return false;
+  let written = false;
+  const scan = (n: ts.Node): void => {
+    if (ts.isIdentifier(n) && checker.getSymbolAtLocation(n) === symbol) {
+      const p = n.parent;
+      if ((ts.isBinaryExpression(p) && p.left === n && p.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && p.operatorToken.kind <= ts.SyntaxKind.LastAssignment) || ts.isPostfixUnaryExpression(p) || (ts.isPrefixUnaryExpression(p) && [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(p.operator))) written = true;
+    }
+    n.forEachChild(scan);
+  };
+  scan(site.getSourceFile());
+  return !written;
+}
+
+function isTypePosition(node: ts.Node): boolean {
+  for (let p = node.parent; p && !ts.isStatement(p); p = p.parent) if (ts.isTypeNode(p)) return true;
+  return false;
+}
+
+/** Return the exact unsupported semantic feature instead of implying a gate failure. */
+export function inlineSafetyReason(target: CitedTarget, wrapperFile: string, sources: FileSources): string | undefined {
+  const analysis = analyseInline(target, wrapperFile, sources);
+  return typeof analysis === "string" ? analysis : undefined;
+}
+
+function analyseInline(target: CitedTarget, wrapperFile: string, sources: FileSources): InlineAnalysis | string {
+  const entry = sources.get(wrapperFile);
+  if (!entry) return "wrapper source is not present in this snapshot";
+  const declaration = target.decl;
+  const members: Member[] = [];
+  let ctorParamNames: string[] = [];
+  const isClass = ts.isClassDeclaration(declaration);
+  const addMember = (name: string, fn: ts.FunctionLikeDeclaration): string | undefined => {
+    if (fn.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) || fn.asteriskToken) return "async and generator wrappers cannot be replaced by a synchronous expression";
+    const invalid = parameterReason(fn.parameters);
+    if (invalid) return invalid;
+    const body = fn.body;
+    if (!body) return "wrapper has no implementation";
+    let forwarded: ts.Expression;
+    let bodyStmts: readonly ts.Statement[] | undefined;
+    if (ts.isBlock(body)) {
+      const last = body.statements.at(-1);
+      if (!last || !ts.isReturnStatement(last) || !last.expression) return "wrapper must end with a concrete returned expression";
+      if (body.statements.length > 1) {
+        if (isClass || !body.statements.slice(0, -1).every((s) => ts.isVariableStatement(s) && (s.declarationList.flags & ts.NodeFlags.Const))) return "only same-scope const bindings followed by return can be spliced";
+        bodyStmts = body.statements;
+      }
+      forwarded = last.expression;
+    } else forwarded = body;
+    if (ts.isAwaitExpression(forwarded)) return "await changes error timing and promise adoption";
+    while (ts.isParenthesizedExpression(forwarded)) forwarded = forwarded.expression;
+    if (!bodyStmts && !ts.isCallExpression(forwarded) && !ts.isNewExpression(forwarded)) return "wrapper does not forward one call";
+    if ((ts.isCallExpression(forwarded) && forwarded.questionDotToken) || fn.parameters.some((p) => !ts.isIdentifier(p.name))) return "optional invocation or destructured parameters are unsupported";
+    let ctorParam: string | undefined;
+    if (isClass && (ts.isCallExpression(forwarded) || ts.isNewExpression(forwarded))) {
+      let receiver: ts.Node = forwarded.expression;
+      while (ts.isPropertyAccessExpression(receiver) && receiver.expression.kind !== ts.SyntaxKind.ThisKeyword) receiver = receiver.expression;
+      if (ts.isPropertyAccessExpression(receiver) && receiver.expression.kind === ts.SyntaxKind.ThisKeyword) {
+        if (!ctorParamNames.includes(receiver.name.text)) return "method uses state other than a constructor parameter property";
+        ctorParam = receiver.name.text;
+        const ctor = (declaration as ts.ClassDeclaration).members.find(ts.isConstructorDeclaration);
+        const property = ctor?.parameters.find((p) => ts.isIdentifier(p.name) && p.name.text === ctorParam);
+        if (!property?.modifiers?.some((m) => [ts.SyntaxKind.PrivateKeyword, ts.SyntaxKind.ProtectedKeyword, ts.SyntaxKind.PublicKeyword, ts.SyntaxKind.ReadonlyKeyword].includes(m.kind))) return "receiver is not an initialized constructor parameter property";
+      }
+    }
+    let unsafe: string | undefined;
+    const scan = (node: ts.Node): void => {
+      if (node !== body && (ts.isFunctionLike(node) || ts.isClassLike(node))) { unsafe = "nested functions or classes introduce a separate lexical scope"; return; }
+      if (ts.isAwaitExpression(node) || ts.isYieldExpression(node) || ts.isMetaProperty(node) || node.kind === ts.SyntaxKind.SuperKeyword || (ts.isIdentifier(node) && ["arguments", "eval"].includes(node.text))) unsafe = "context-dependent arguments, eval, await, yield, super, or new.target cannot be moved";
+      if (node.kind === ts.SyntaxKind.ThisKeyword && !(ctorParam && ts.isPropertyAccessExpression(node.parent) && node.parent.expression === node && node.parent.name.text === ctorParam)) unsafe = "this would acquire the caller's binding";
+      node.forEachChild(scan);
+    };
+    scan(body);
+    if (unsafe) return unsafe;
+    members.push({ name, forwarded, params: fn.parameters.map((p) => (p.name as ts.Identifier).text), ctorParam, bodyStmts });
+    return undefined;
+  };
+  if (isClass) {
+    const invalid = transparentClassReason(declaration);
+    if (invalid) return invalid;
+    const ctor = declaration.members.find(ts.isConstructorDeclaration);
+    ctorParamNames = ctor?.parameters.map((p) => (p.name as ts.Identifier).text) ?? [];
+    for (const member of declaration.members) {
+      if (ts.isConstructorDeclaration(member)) continue;
+      if (!ts.isMethodDeclaration(member) || !ts.isIdentifier(member.name)) return "only named instance methods are supported";
+      const invalid = addMember(member.name.text, member);
+      if (invalid) return invalid;
+    }
+  } else {
+    const fn = ts.isFunctionDeclaration(declaration) ? declaration : ts.isVariableDeclaration(declaration) && declaration.initializer && (ts.isArrowFunction(declaration.initializer) || ts.isFunctionExpression(declaration.initializer)) ? declaration.initializer : undefined;
+    if (!fn) return "only whole forwarding functions or classes can be inlined";
+    const invalid = addMember(target.name, fn);
+    if (invalid) return invalid;
+  }
+  if (!members.length) return "class has no forwarding instance method";
+  const checker = createBindingContext(new Map([...sources].map(([file, value]) => [file, value.sf])));
+  const callSites: InlineAnalysis["callSites"] = [];
+  for (const [file, src] of sources) {
+    const bindings = file === wrapperFile ? new Set([target.name]) : importBindingsLocal(src.sf, file, sources, wrapperFile, target.name);
+    if (!bindings.size) continue;
+    const visit = (node: ts.Node): void => {
+      if (isClass && ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+        const member = members.find((m) => m.name === (node.expression as ts.PropertyAccessExpression).name.text);
+        if (member) {
+          const resolved = resolveCtorArgs(src.sf, node.expression.expression, bindings);
+          if (resolved) callSites.push({ member, site: { file, expr: node, ctorDep: member.ctorParam ? resolved.ctorArgs[ctorParamNames.indexOf(member.ctorParam)] : undefined, args: node.arguments, ctorArgs: resolved.ctorArgs } });
+        }
+      } else if (!isClass && ts.isCallExpression(node) && ts.isIdentifier(node.expression) && bindings.has(node.expression.text)) {
+        const sym = checker.getSymbolAtLocation(node.expression);
+        const expected = declaration && "name" in declaration && declaration.name && ts.isIdentifier(declaration.name as ts.Node) ? checker.getSymbolAtLocation(declaration.name as ts.Identifier) : undefined;
+        if (bindingIdentity(sym, node.expression.text, checker) === bindingIdentity(expected, target.name, checker)) callSites.push({ member: members[0]!, site: { file, expr: node, args: node.arguments } });
+      }
+      node.forEachChild(visit);
+    };
+    visit(src.sf);
+  }
+  if (callSites.length !== 1) return "exactly one mechanically resolved invocation is required";
+  const targetName = "name" in declaration && declaration.name && ts.isIdentifier(declaration.name as ts.Node) ? declaration.name as ts.Identifier : undefined;
+  const targetIdentity = bindingIdentity(targetName ? checker.getSymbolAtLocation(targetName) : undefined, target.name, checker);
+  let escaped = false;
+  let constructionCount = 0;
+  for (const [, source] of sources) {
+    const scan = (node: ts.Node): void => {
+      if (node === declaration) return;
+      if (ts.isIdentifier(node) && bindingIdentity(checker.getSymbolAtLocation(node), node.text, checker) === targetIdentity) {
+        const parent = node.parent;
+        const importName = ts.isImportSpecifier(parent) || ts.isImportClause(parent);
+        const invocation = (ts.isCallExpression(parent) || ts.isNewExpression(parent)) && parent.expression === node;
+        if (ts.isNewExpression(parent) && parent.expression === node) constructionCount++;
+        if (!importName && !invocation && !isTypePosition(node)) escaped = true;
+      }
+      node.forEachChild(scan);
+    };
+    scan(source.sf);
+  }
+  if (escaped || (isClass && constructionCount !== 1)) return "wrapper identity escapes, or its construction is not single-use";
+  const { site, member } = callSites[0]!;
+  if (isClass && (site.ctorArgs?.length ?? 0) !== ctorParamNames.length) return "constructor arity would change argument evaluation";
+  if (site.expr.questionDotToken || site.args.some(ts.isSpreadElement) || site.args.length !== member.params.length) return "call arity, spread, or optional invocation would change parameter binding";
+  for (const [i, argument] of site.args.entries()) if (!stableArgument(argument, site.expr, checker)) return `argument ${i + 1} may have effects or read a mutable binding; substitution cannot preserve evaluation`;
+  if (member.bodyStmts && site.file !== wrapperFile) return "multi-statement bodies are supported only within their original module";
+  if (member.bodyStmts) {
+    const declared = new Set<string>();
+    for (const stmt of member.bodyStmts) if (ts.isVariableStatement(stmt)) for (const item of stmt.declarationList.declarations) if (ts.isIdentifier(item.name)) declared.add(item.name.text); else return "destructured local bindings cannot be spliced";
+    const scope = enclosingFunction(site.expr) ?? site.expr.getSourceFile();
+    let collision = false;
+    const scan = (n: ts.Node): void => {
+      if (n === declaration) return;
+      if (ts.isIdentifier(n) && declared.has(n.text)) collision = true;
+      n.forEachChild(scan);
+    };
+    scan(scope);
+    if (collision) return "spliced local binding would collide with the caller's scope";
+    const parent = site.expr.parent;
+    const directReturn = ts.isReturnStatement(parent) && parent.expression === site.expr;
+    const directCall = ts.isExpressionStatement(parent);
+    const directAssignment = ts.isBinaryExpression(parent) && parent.right === site.expr && ts.isIdentifier(parent.left) && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment && ts.isExpressionStatement(parent.parent);
+    if (!directReturn && !directCall && !directAssignment) return "multi-statement calls must be direct returns or assignment values; splicing here would reorder or discard surrounding expressions";
+  }
+  const receiver = site.expr.expression;
+  const stored = isClass && ts.isPropertyAccessExpression(receiver) && !ts.isNewExpression(receiver.expression);
+  if (stored && !(ts.isPropertyAccessExpression(receiver) && ts.isPropertyAccessExpression(receiver.expression) && receiver.expression.expression.kind === ts.SyntaxKind.ThisKeyword)) return "stored local wrapper instances require a lifetime-preserving transform";
+  if (stored && sources.get(site.file)!.sf.statements.filter(ts.isClassDeclaration).length !== 1) return "stored wrapper lookup is ambiguous across classes";
+  const transparentDependency = (node: ts.Node, seen = new Set<string>()): boolean => {
+    if (ts.isExpression(node) && stableArgument(node, node, checker)) return true;
+    if (!ts.isNewExpression(node) || !ts.isIdentifier(node.expression)) return false;
+    const symbol = checker.getSymbolAtLocation(node.expression);
+    const resolved = symbol && (symbol.flags & ts.SymbolFlags.Alias) ? checker.getAliasedSymbol(symbol) : symbol;
+    const cls = resolved?.declarations?.find(ts.isClassDeclaration);
+    if (!cls || seen.has(cls.getSourceFile().fileName + cls.pos) || transparentClassReason(cls)) return false;
+    seen.add(cls.getSourceFile().fileName + cls.pos);
+    const ctor = cls.members.find(ts.isConstructorDeclaration);
+    return (node.arguments?.length ?? 0) === (ctor?.parameters.length ?? 0) && (node.arguments ?? []).every((arg) => transparentDependency(arg, seen));
+  };
+  if (member.ctorParam && site.ctorDep) {
+    let capturesLocal = false;
+    const capture = (n: ts.Node): void => {
+      if (ts.isIdentifier(n) && !(ts.isPropertyAccessExpression(n.parent) && n.parent.name === n)) {
+        const decl = checker.getSymbolAtLocation(n)?.valueDeclaration;
+        if (decl && ts.isVariableDeclaration(decl) && enclosingFunction(decl)) capturesLocal = true;
+      }
+      n.forEachChild(capture);
+    };
+    capture(site.ctorDep);
+    if (stored && capturesLocal) return "dependency captures a constructor local that does not exist in the method scope";
+    if (stored && !transparentDependency(site.ctorDep)) return "moving dependency construction from the constructor to a call changes lifetime or side effects";
+    if (!stored && ts.isNewExpression(site.ctorDep) && !transparentDependency(site.ctorDep)) return "dependency constructor is not proven transparent";
+  }
+  for (const [i, argument] of (site.ctorArgs ?? []).entries()) {
+    if (ctorParamNames[i] !== member.ctorParam && (!ts.isExpression(argument) || !stableArgument(argument, argument, checker))) return "unused constructor argument has effects that would be removed";
+  }
+  // Every free name introduced by the replacement must resolve to the same binding
+  // at the call site, or be the one imported callee that we transfer explicitly.
+  const visible = checker.getSymbolsInScope(site.expr, ts.SymbolFlags.Value | ts.SymbolFlags.Type | ts.SymbolFlags.Namespace | ts.SymbolFlags.Alias);
+  let bindingReason: string | undefined;
+  const scanBindings = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && !member.params.includes(node.text)) {
+      const parent = node.parent;
+      const property = (ts.isPropertyAccessExpression(parent) && parent.name === node) || ((ts.isPropertyAssignment(parent) || ts.isPropertySignature(parent) || ts.isMethodSignature(parent)) && parent.name === node);
+      const localDecl = ts.isVariableDeclaration(parent) && parent.name === node;
+      if (!property && !localDecl) {
+        const symbol = checker.getSymbolAtLocation(node);
+        const declaredInside = symbol?.declarations?.some((d) => d.getSourceFile() === declaration.getSourceFile() && d.pos >= declaration.pos && d.end <= declaration.end);
+        if (!declaredInside) {
+          const expected = bindingIdentity(symbol, node.text, checker);
+          const found = visible.find((s) => s.name === node.text);
+          const actual = bindingIdentity(found, node.text, checker);
+          let importedCallee = false;
+          if (ts.isCallExpression(member.forwarded) || ts.isNewExpression(member.forwarded)) {
+            const callee = member.forwarded.expression;
+            importedCallee = callee === node && !!symbol?.declarations?.some(ts.isImportSpecifier);
+            importedCallee ||= callee === node && !!symbol?.declarations?.some(ts.isImportClause);
+          }
+          if (expected !== actual && !(importedCallee && !found && !isTypePosition(node))) bindingReason = `free binding ${node.text} would resolve differently in the caller`;
+        }
+      }
+    }
+    node.forEachChild(scanBindings);
+  };
+  if (member.bodyStmts) member.bodyStmts.forEach(scanBindings); else scanBindings(member.forwarded);
+  if (bindingReason) return bindingReason;
+  // Same-file inlines delete only the declaration. A re-export of the
+  // module stays valid because the file itself is not removed.
+  if (site.file !== wrapperFile) {
+    for (const statement of entry.sf.statements) {
+      if (statement === declaration || ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) continue;
+      if (ts.isVariableStatement(statement) && statement.declarationList.declarations.includes(declaration as ts.VariableDeclaration)) continue;
+      if (ts.isImportDeclaration(statement) && statement.importClause) {
+        const clause = statement.importClause;
+        if (clause.isTypeOnly || (clause.namedBindings && ts.isNamedImports(clause.namedBindings) && clause.namedBindings.elements.every((el) => el.isTypeOnly))) continue;
+        const module = ts.isStringLiteral(statement.moduleSpecifier) ? resolveFrom(wrapperFile, statement.moduleSpecifier.text, sources) : undefined;
+        const alreadyImported = module && sources.get(site.file)!.sf.statements.some((s) => ts.isImportDeclaration(s) && ts.isStringLiteral(s.moduleSpecifier) && resolveFrom(site.file, s.moduleSpecifier.text, sources) === module);
+        const callee = ts.isCallExpression(member.forwarded) || ts.isNewExpression(member.forwarded) ? member.forwarded.expression : undefined;
+        const calleeBound = callee && ts.isIdentifier(callee) && (clause.name?.text === callee.text || (clause.namedBindings && ts.isNamedImports(clause.namedBindings) && clause.namedBindings.elements.some((el) => el.name.text === callee.text)));
+        if (alreadyImported || (module && calleeBound)) continue;
+        return "a value import's module effects cannot be preserved at the call site";
+      }
+      return "deleting the wrapper module would remove another runtime declaration or module side effect";
+    }
+  }
+  for (const [file, source] of sources) {
+    let moduleReference: string | undefined;
+    const scan = (node: ts.Node): void => {
+      if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier) && resolveFrom(file, node.moduleSpecifier.text, sources) === wrapperFile) {
+        if (!ts.isImportDeclaration(node) || !node.importClause) {
+          if (site.file !== wrapperFile) moduleReference = "wrapper module has a re-export or side-effect import";
+        }
+        else {
+          const clause = node.importClause;
+          if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) moduleReference = "namespace imports can expose wrapper identity";
+          const bindsTarget = clause.name || (clause.namedBindings && ts.isNamedImports(clause.namedBindings) && clause.namedBindings.elements.some((el) => (el.propertyName ?? el.name).text === target.name));
+          if (bindsTarget && file !== site.file) moduleReference = "another module still imports the wrapper declaration";
+          if (file === site.file && clause.namedBindings && ts.isNamedImports(clause.namedBindings) && clause.namedBindings.elements.some((el) => (el.propertyName ?? el.name).text !== target.name)) moduleReference = "mixed-name wrapper imports need a separate import rewrite";
+        }
+      }
+      if (site.file !== wrapperFile && ts.isCallExpression(node) && node.arguments[0] && ts.isStringLiteral(node.arguments[0]) && resolveFrom(file, node.arguments[0].text, sources) === wrapperFile) moduleReference = "dynamic imports or require references would outlive the wrapper module";
+      node.forEachChild(scan);
+    };
+    scan(source.sf);
+    if (moduleReference) return moduleReference;
+  }
+  return { callSites };
+}
+
 /**
  * The `inline` codemod for the cited wrapper `target` in
  * `wrapperFile`. See the module header for the skip conditions.
@@ -538,125 +912,11 @@ export function inlineCodemod(
 ): CodemodResult | undefined {
   const entry = sources.get(wrapperFile);
   if (!entry) return undefined;
-  const decl = target.decl;
   const wrapperSf = entry.sf;
 
-  // Wrapper members: every method (or the function itself) must be a
-  // single return forwarding to one call — re-verified here so the
-  // codemod never trusts a stale or broader citation.
-  const members: Member[] = [];
-  let ctorParamNames: string[] = [];
-  const isClass = ts.isClassDeclaration(decl);
-  if (isClass) {
-    for (const m of decl.members) {
-      if (ts.isConstructorDeclaration(m)) {
-        ctorParamNames = m.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : ""));
-        if (ctorParamNames.some((p) => !p)) return undefined;
-        continue;
-      }
-      if (!ts.isMethodDeclaration(m) || !m.body || !m.name || !ts.isIdentifier(m.name)) return undefined;
-      if (m.parameters.some((p) => !ts.isIdentifier(p.name))) return undefined;
-      const only = m.body.statements.length === 1 ? m.body.statements[0] : undefined;
-      if (!only || !ts.isReturnStatement(only) || !only.expression) return undefined;
-      let e: ts.Node = only.expression;
-      while (ts.isAwaitExpression(e) || ts.isParenthesizedExpression(e)) e = e.expression;
-      if (!ts.isCallExpression(e) && !ts.isNewExpression(e)) return undefined;
-      // Which constructor parameter does `this.<x>` refer to?
-      let ctorParam: string | undefined;
-      let chain: ts.Node = (e as ts.CallExpression | ts.NewExpression).expression;
-      while (ts.isPropertyAccessExpression(chain) && chain.expression.kind !== ts.SyntaxKind.ThisKeyword) chain = chain.expression;
-      if (ts.isPropertyAccessExpression(chain) && chain.expression.kind === ts.SyntaxKind.ThisKeyword) {
-        ctorParam = ctorParamNames.includes(chain.name.text) ? chain.name.text : undefined;
-        if (!ctorParam) return undefined;
-      }
-      members.push({
-        name: m.name.text,
-        forwarded: e as ts.CallExpression | ts.NewExpression,
-        params: m.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : "")),
-        ctorParam,
-      });
-    }
-    if (!members.length) return undefined;
-  } else {
-    let body: ts.Node | undefined;
-    let params: string[] = [];
-    if (ts.isFunctionDeclaration(decl)) {
-      body = decl.body;
-      params = decl.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : ""));
-    } else if (
-      ts.isVariableDeclaration(decl) &&
-      decl.initializer &&
-      (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))
-    ) {
-      body = decl.initializer.body;
-      params = decl.initializer.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : ""));
-    }
-    if (!body || params.some((p) => !p)) return undefined;
-    let e: ts.Node;
-    let bodyStmts: readonly ts.Statement[] | undefined;
-    if (ts.isBlock(body)) {
-      const only = body.statements.length === 1 ? body.statements[0] : undefined;
-      if (only && ts.isReturnStatement(only) && only.expression) {
-        e = only.expression;
-      } else if (
-        body.statements.length > 1 &&
-        body.statements.slice(0, -1).every((s) => ts.isVariableStatement(s)) &&
-        ts.isReturnStatement(body.statements.at(-1)!) &&
-        (body.statements.at(-1) as ts.ReturnStatement).expression
-      ) {
-        // e.g. lineTotal: `const rate = f(line); return <expr using rate>;`
-        bodyStmts = body.statements;
-        e = (body.statements.at(-1) as ts.ReturnStatement).expression!;
-      } else return undefined;
-    } else {
-      e = body;
-    }
-    while (ts.isAwaitExpression(e) || ts.isParenthesizedExpression(e)) e = e.expression;
-    if (!bodyStmts && !ts.isCallExpression(e) && !ts.isNewExpression(e)) return undefined;
-    members.push({ name: target.name, forwarded: e as ts.CallExpression | ts.NewExpression, params, bodyStmts });
-  }
-
-  // Collect ALL uses of the wrapper symbol across the checkout. The
-  // codemod requires exactly one *invoke* site; constructions that
-  // only feed that invocation (fixtures: `new UserService(new Repo)`)
-  // are part of it, while any other reference blocks the edit. The
-  // wrapper file ITSELF is also scanned: after an inner layer was
-  // inlined, the surviving outer wrapper forwards through the
-  // wrapper name in its own body (`return this.api.fetchUser(id)`),
-  // which is a same-file call site with `decl === wrapper`.
-  const callSites: { site: Site; member: Member }[] = [];
-  for (const [file, src] of sources) {
-    const sameFile = file === wrapperFile;
-    const bindings = sameFile
-      ? new Set([target.name])
-      : importBindingsLocal(src.sf, file, sources, wrapperFile, target.name);
-    if (!bindings.size) continue;
-    const visit = (node: ts.Node): void => {
-      if (isClass && ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-        const member = members.find((m) => m.name === (node.expression as ts.PropertyAccessExpression).name.text);
-        if (member) {
-          const resolved = resolveCtorArgs(src.sf, node.expression.expression, bindings);
-          if (resolved) {
-            callSites.push({
-              member,
-              site: {
-                file,
-                expr: node,
-                ctorDep: member.ctorParam ? resolved.ctorArgs[ctorParamNames.indexOf(member.ctorParam)] : undefined,
-                args: node.arguments,
-              },
-            });
-          }
-        }
-      }
-      if (!isClass && ts.isCallExpression(node) && ts.isIdentifier(node.expression) && bindings.has(node.expression.text)) {
-        callSites.push({ member: members[0]!, site: { file, expr: node, args: node.arguments } });
-      }
-      node.forEachChild(visit);
-    };
-    visit(src.sf);
-  }
-  if (callSites.length !== 1) return undefined;
+  const analysis = analyseInline(target, wrapperFile, sources);
+  if (typeof analysis === "string") return undefined;
+  const { callSites } = analysis;
   const { site, member } = callSites[0]!;
   const siteEntry = sources.get(site.file);
   if (!siteEntry) return undefined;
@@ -696,7 +956,7 @@ export function inlineCodemod(
     splice = { start: stmt.getStart(siteEntry.sf), end: stmt.getEnd(), text: stmtText };
   }
   let callerText = applyReplacements(siteEntry.text, [
-    splice ?? { start: site.expr.getStart(siteEntry.sf), end: site.expr.getEnd(), text: resolved.text },
+    splice ?? { start: site.expr.getStart(siteEntry.sf), end: site.expr.getEnd(), text: /^\s*\{/.test(resolved.text) && (ts.isExpressionStatement(site.expr.parent) || ts.isArrowFunction(site.expr.parent)) ? `(${resolved.text})` : resolved.text },
   ]);
   if (callerText === undefined) return undefined;
 
@@ -718,9 +978,12 @@ export function inlineCodemod(
       }
       // Only proceed when the single bound name is the wrapper's.
       if (bound.length !== 1 || bound[0]!.orig !== target.name) return undefined;
-      const lineStart = callerText.lastIndexOf("\n", stmt.getStart(sf1) - 1) + 1;
-      const nl = callerText.indexOf("\n", stmt.getEnd());
-      removed = callerText.slice(0, lineStart) + callerText.slice(nl === -1 ? callerText.length : nl + 1);
+      const start = stmt.getStart(sf1), end = stmt.getEnd();
+      const lineStart = callerText.lastIndexOf("\n", start - 1) + 1;
+      const nl = callerText.indexOf("\n", end);
+      const lineEnd = nl === -1 ? callerText.length : nl;
+      const ownsLine = !callerText.slice(lineStart, start).trim() && !callerText.slice(end, lineEnd).trim();
+      removed = ownsLine ? callerText.slice(0, lineStart) + callerText.slice(nl === -1 ? lineEnd : nl + 1) : callerText.slice(0, start) + callerText.slice(end);
       break;
     }
     // No import to remove is fine (same-file wrappers never reach
@@ -730,7 +993,9 @@ export function inlineCodemod(
 
   // The forwarded callee may need importing into the surviving caller.
   if (resolved.neededImport) {
-    callerText = `import { ${resolved.neededImport.local} } from ${JSON.stringify(relativeSpecifier(site.file, resolved.neededImport.from))};\n` + callerText;
+    const { local, imported, from } = resolved.neededImport;
+    const binding = imported === "default" ? local : `{ ${imported === local ? local : `${imported} as ${local}`} }`;
+    callerText = `import ${binding} from ${JSON.stringify(relativeSpecifier(site.file, from))};\n` + callerText;
   }
 
   // Stored-instance cleanup: when the caller's class stores the
@@ -746,7 +1011,7 @@ export function inlineCodemod(
     ts.isPropertyAccessExpression(receiver.expression) &&
     receiver.expression.expression.kind === ts.SyntaxKind.ThisKeyword
   ) {
-    const cleaned = eraseStoredWrapper(callerText, site.file, resolved.thisDeps);
+    const cleaned = eraseStoredWrapper(callerText, site.file, receiver.expression.name.text, resolved.thisDeps);
     if (cleaned === undefined) return undefined;
     callerText = cleaned;
   }

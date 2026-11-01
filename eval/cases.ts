@@ -99,11 +99,11 @@ export const EVAL_CASES: EvalCase[] = [
   },
   {
     id: "pre-failing-tests",
-    probes: "tests already fail on the untouched head: the failure is baseline state, so a sound edit is still accepted and the report names the pre-existing failure",
+    probes: "tests already fail on the untouched head: report the baseline failure and refuse an unverifiable patch",
     dir: dir("pre-failing-tests"),
     intent: ["src/userApi.ts", "src/userFetcher.ts"],
     expectedFindings: [{ category: "single-use-abstraction", file: "src/userApi.ts" }],
-    expectedVerdict: "accepted",
+    expectedVerdict: "reviewed",
     spark: [singleUseUserApi],
     wonder: [{ findingIndex: 0, action: "inline", rationale: "inline the single-use wrapper" }],
     wonderReview: [],

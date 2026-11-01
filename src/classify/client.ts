@@ -77,6 +77,7 @@ export interface GuestClient {
     messages: ChatMessage[];
     tools?: ToolDefinition[];
     toolChoice?: "auto";
+    signal?: AbortSignal;
   }): Promise<ChatCompletionResult>;
 }
 
@@ -125,7 +126,10 @@ export function createGuestClient(opts?: {
       let res: Awaited<ReturnType<FetchLike>> | undefined;
       let raw = "";
       for (let attempt = 0; ; attempt++) {
+        req.signal?.throwIfAborted();
         const controller = new AbortController();
+        const cancel = () => controller.abort(req.signal?.reason);
+        req.signal?.addEventListener("abort", cancel, { once: true });
         const timer = setTimeout(() => controller.abort(), timeoutMs);
         try {
           res = await fetchFn(`${config.baseUrl}/chat/completions`, {
@@ -137,13 +141,15 @@ export function createGuestClient(opts?: {
             body: JSON.stringify(body),
             signal: controller.signal,
           });
+          raw = await res.text();
         } catch (e) {
+          req.signal?.throwIfAborted();
           if (controller.signal.aborted) throw new ModelTimeoutError(timeoutMs);
           throw e;
         } finally {
           clearTimeout(timer);
+          req.signal?.removeEventListener("abort", cancel);
         }
-        raw = await res.text();
         if (res.ok) break;
         if (!isTransientStatus(res.status) || attempt >= maxRetries) break;
         await sleep(retryBackoffMs * 2 ** attempt);

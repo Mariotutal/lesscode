@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, lstatSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { Citation, Finding } from "./schema.js";
 // Finding is the model-side type; scope-creep findings (code-decided)
@@ -6,11 +6,17 @@ import type { Citation, Finding } from "./schema.js";
 
 /** Normalise a repo-relative path (POSIX separators), or undefined if it escapes. */
 export function normaliseRepoPath(checkoutDir: string, file: string): string | undefined {
+  if (isAbsolute(file)) return undefined;
   const cleaned = file.replace(/\\/g, "/").replace(/^\.?\//, "");
   if (!cleaned || cleaned.includes("\0")) return undefined;
   const abs = resolve(checkoutDir, cleaned);
   const rel = relative(resolve(checkoutDir), abs);
   if (rel.startsWith("..") || isAbsolute(rel)) return undefined;
+  let cursor = resolve(checkoutDir);
+  for (const segment of rel.split(sep)) {
+    cursor = resolve(cursor, segment);
+    try { if (lstatSync(cursor).isSymbolicLink()) return undefined; } catch { /* absent paths can still be restoration targets */ }
+  }
   return rel.split(sep).join("/");
 }
 
