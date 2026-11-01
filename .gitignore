@@ -5,3 +5,7 @@ node_modules/
 dist/
 .lesscode-data/
 .lesscode-service/
+
+# VitePress build output
+/docs/.vitepress/dist/
+/docs/.vitepress/cache/
