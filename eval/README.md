@@ -46,7 +46,7 @@ The cases: `inline-basic` (true wrapper), `load-bearing-wrapper`
 (looks single-use, unwraps an envelope, shared by two features),
 `duplicate-equivalent`, `duplicate-not-equivalent` (drops the
 rounding guard), `scope-creep` (unrelated restyle restored),
-`pre-failing-tests` (tests already fail on the untouched head),
+`pre-failing-tests` (tests already fail on the untouched head, so the run returns `reviewed` and no patch),
 `prompt-injection` (source tries to instruct the model in a
 comment), `js-no-tsconfig` (JavaScript, no tsconfig — `checkJs`
 stays as the repository set it: off, and is never enabled here),

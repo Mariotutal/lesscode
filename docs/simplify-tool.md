@@ -1,12 +1,15 @@
 # The `simplify` tool contract
 
-One tool another agent can call to run the exact same pipeline as
-`simplify(checkout, base, intent)` (LES-5). The tool is a thin adapter:
-its handler validates the arguments and forwards them verbatim to
-`simplify` (`src/simplify/simplify.ts`) and returns the result
-unchanged. There is no second pipeline and no second verdict — the
-deterministic TypeScript gate inside `simplify` decides, and the
-calling agent **does not re-decide the verdict**.
+One tool another agent can call to run the same review as
+`simplify(checkout, base, intent)`. The handler validates the arguments
+and forwards them to `simplify` (`src/simplify/simplify.ts`), which is a
+patch-only view of `runReview`. The engine's gate decides, and the
+calling agent does not re-decide the verdict. The run itself is
+described in [architecture.md](architecture.md).
+
+`review_change` (`src/tool/reviewTool.ts`) takes the same arguments and
+returns the `RunRecord` directly. The host chooses local or container
+execution. The model does not.
 
 - Definition: `SIMPLIFY_TOOL_DEF` in `src/tool/tool.ts` (a
   function-calling tool definition, `{ type: "function", function: { name: "simplify", description, parameters } }`).
