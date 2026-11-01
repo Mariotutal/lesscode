@@ -205,6 +205,54 @@ describe("classifier tool loop (stubbed wire)", () => {
   });
 });
 
+describe("LES-30 citation recovery", () => {
+  const citeF = (file: string, startLine: number, endLine: number) => ({ file, startLine, endLine });
+  const run = async (dir: string, findings: unknown[]) => classifyFindings({ checkoutDir: dir, client: stubClient([{ findings }]) });
+
+  it("keeps a wrapper cited five lines below its real position, with corrected citations", async () => {
+    const dir = checkout(SRC); // Wrapper is at src/wrap.ts:1-4, called at src/use.ts:2
+    const slipped = {
+      category: "single-use-abstraction",
+      file: "src/wrap.ts",
+      citations: [citeF("src/wrap.ts", 6, 9), citeF("src/use.ts", 7, 7)],
+      rationale: "Wrapper forwards and is used once",
+    };
+    const r = await run(dir, [slipped]);
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]!.citations).toEqual([citeF("src/wrap.ts", 1, 4), citeF("src/use.ts", 2, 2)]);
+    expect(r.dropped).toEqual([]);
+    expect(r.recovered).toHaveLength(1);
+    expect(r.recovered[0]!.symbol).toBe("Wrapper");
+    expect(r.recovered[0]!.file).toBe("src/wrap.ts");
+    expect(r.recovered[0]!.originalCitations).toEqual(slipped.citations);
+    expect(r.recovered[0]!.citations).toEqual(r.findings[0]!.citations);
+  });
+
+  it("still drops a finding naming a symbol that does not exist", async () => {
+    const dir = checkout(SRC);
+    const ghost = {
+      category: "single-use-abstraction",
+      file: "src/wrap.ts",
+      citations: [citeF("src/wrap.ts", 30, 33)],
+      rationale: "MissingHelper forwards and is used once",
+    };
+    const r = await run(dir, [ghost]);
+    expect(r.findings).toEqual([]);
+    expect(r.recovered).toEqual([]);
+    expect(r.dropped).toHaveLength(1);
+  });
+
+  it("drops when more than one declaration matches the named symbol", async () => {
+    const dir = checkout({
+      "src/a.ts": "export function dup(): number { return 1; }\nexport class dup {}\n",
+    });
+    const r = await run(dir, [{ category: "convention-break", file: "src/a.ts", convention: "no-console-log", citations: [citeF("src/a.ts", 9, 9)], rationale: "dup breaks it" }]);
+    expect(r.findings).toEqual([]);
+    expect(r.recovered).toEqual([]);
+    expect(r.dropped).toHaveLength(1);
+  });
+});
+
 describe("LES-19 scoped review files", () => {
   it("sees the change + one-hop neighbours + related tests, not the whole checkout", () => {
     const dir = checkout({
