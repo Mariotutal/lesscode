@@ -1,7 +1,8 @@
 import { createGuestClient, type GuestClient, type ToolDefinition } from "./client.js";
 import { CONVENTIONS, loadRepositoryConventions, unknownConventionNames } from "./conventions.js";
 import { assertFitsWindow, readCheckoutSources, type CheckoutSource } from "./checkout.js";
-import { citationExistsInText, filterByEvidence, isSealedPath, normaliseRepoPath } from "./evidence.js";
+import { citationExistsInText, isSealedPath, normaliseRepoPath } from "./evidence.js";
+import { recoverFindings, type RecoveredFinding } from "./recover.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { decideConventionBreak, type ConventionDecision } from "./conventionBreak.js";
@@ -84,6 +85,8 @@ export interface ClassifyResult {
   findings: (Finding | ScopeCreepFinding)[];
   /** Model findings dropped because cited lines do not exist (or file is sealed/outside), or verification failed. */
   dropped: Finding[];
+  /** Findings the evidence check would have dropped, recovered in code by moving their citations to the one matching declaration (LES-30). */
+  recovered: RecoveredFinding[];
   /** Findings dropped by the code verification pass (LES-20), with reasons. */
   verificationDropped: VerificationDrop[];
   /** Convention names this repository wrote in lesscode-conventions.json. */
@@ -214,9 +217,13 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
   }
 
   const all = validated?.findings ?? [];
-  const evidenceKept = filterByEvidence(opts.checkoutDir, all);
-  const keptSet = new Set(evidenceKept);
-  const evidenceDropped = all.filter((f) => !keptSet.has(f as Finding));
+  // Evidence, with code-only recovery (LES-30): a finding whose
+  // citations are off by a few lines is moved to the one declaration
+  // its named symbol matches in the file it already named, instead of
+  // being dropped whole. Ambiguous or unmatched findings drop as before.
+  const recovery = recoverFindings(opts.checkoutDir, all);
+  const evidenceKept = recovery.kept;
+  const evidenceDropped = recovery.dropped;
 
   // Verification (LES-20): code decides whether single-use and
   // duplicate findings are actually true; failures drop with a reason.
@@ -253,9 +260,12 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
     }
   }
 
+  // Only recoveries whose finding survived every later pass are reported.
+  const finalSet = new Set(finalModel);
   return {
     findings: [...finalModel, ...scopeFindings],
     dropped,
+    recovered: recovery.recovered.filter((r) => finalSet.has(r.finding)),
     verificationDropped: verification.dropped,
     registry,
     unknownConventions,

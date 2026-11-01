@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { changedFilesFromGit, contextWindow, estimateTokens, expandIntentFiles, readCheckoutSources, scopedReviewFiles, listClassifiableFiles } from "../classify/checkout.js";
 import type { GuestClient } from "../classify/client.js";
 import { classifyFindings } from "../classify/classify.js";
+import type { RecoveredFinding } from "../classify/recover.js";
 import { createGuestClient } from "../classify/client.js";
 import { isSealedPath } from "../classify/evidence.js";
 import { evaluateCheapGate, evaluateCommandGate, type GateResult } from "../gate/gate.js";
@@ -43,6 +44,8 @@ export interface SimplifyResult {
   findings: AnyFinding[];
   gate: GateResult | null;
   droppedFindings: number;
+  /** Findings recovered in code after a citation slip (LES-30): which finding, which symbol, citations before/after. */
+  recoveredFindings: RecoveredFinding[];
   plan: { edits: number; skipped: { findingIndex: number; reason: string }[]; model: string; modelCalls: number; usage?: unknown; review: ReviewNoteItem[] };
   /** Convention names written in the checkout's lesscode-conventions.json. */
   registry: string[];
@@ -261,7 +264,12 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
       const label = (f: AnyFinding) => `${f.category} in ${f.file}`;
       const summary = renderRunSummary({
         verdict: partial.verdict,
-        findingsKept: findings.map((f) => ({ label: label(f) })),
+        findingsKept: findings.map((f) => ({
+        label: label(f),
+        ...(classification.recovered.some((r) => r.finding === (f as Finding))
+          ? { reason: `recovered: citations moved to ${classification.recovered.find((r) => r.finding === (f as Finding))!.symbol} in ${f.file}` }
+          : {}),
+      })),
         findingsDropped: [
           ...classification.verificationDropped.map((d) => ({ label: label(d.finding), reason: d.reason })),
           ...classification.dropped.filter((f) => !classification.verificationDropped.some((d) => d.finding === f)).map((f) => ({ label: label(f as AnyFinding), reason: "cited lines do not exist in the checkout (evidence check)" })),
@@ -282,7 +290,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     }));
 
     if (!appliedAll.length) {
-      return finish({ verdict: "refused", patch: "", findings, gate: lastGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, unknownConventions: classification.unknownConventions, refusedConventions, reasons });
+      return finish({ verdict: "refused", patch: "", findings, gate: lastGate, droppedFindings: classification.dropped.length, recoveredFindings: classification.recovered, plan: planSummary, apply: applySummary, registry: classification.registry, unknownConventions: classification.unknownConventions, refusedConventions, reasons });
     }
 
     const finalEditSet = [...new Set(keptEditSet)];
@@ -302,13 +310,13 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     };
     if (!finalGate.accepted) {
       return finish({
-        verdict: "refused", patch: "", findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, unknownConventions: classification.unknownConventions, refusedConventions,
+        verdict: "refused", patch: "", findings, gate: finalGate, droppedFindings: classification.dropped.length, recoveredFindings: classification.recovered, plan: planSummary, apply: applySummary, registry: classification.registry, unknownConventions: classification.unknownConventions, refusedConventions,
         reasons: [...reasons, `final gate rejected: ${finalGate.checks.filter((c) => !c.passed).map((c) => c.name).join(", ")}`],
       });
     }
 
     const patch = await git(scratch, ["-c", "color.ui=false", "diff", "--no-color", headSha, "--", "."]);
-    return finish({ verdict: "accepted", patch, findings, gate: finalGate, droppedFindings: classification.dropped.length, plan: planSummary, apply: applySummary, registry: classification.registry, unknownConventions: classification.unknownConventions, refusedConventions, reasons });
+    return finish({ verdict: "accepted", patch, findings, gate: finalGate, droppedFindings: classification.dropped.length, recoveredFindings: classification.recovered, plan: planSummary, apply: applySummary, registry: classification.registry, unknownConventions: classification.unknownConventions, refusedConventions, reasons });
   } finally {
     await exec("git", ["worktree", "remove", "--force", scratch], { cwd: checkout }).catch(() => undefined);
     await exec("git", ["worktree", "prune"], { cwd: checkout }).catch(() => undefined);
