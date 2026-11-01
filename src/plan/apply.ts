@@ -12,6 +12,7 @@ import { WONDER_MODEL } from "./plan.js";
 import type { AnyFinding } from "./plan.js";
 import { inlineCodemod, loadSources, retargetCodemod, type CodemodResult } from "./codemod.js";
 import { statementDiffKeys, unrelatedChangeReason } from "./guard.js";
+import { restoreFiles, snapshotFiles } from "./snapshot.js";
 
 const exec = promisify(execFile);
 
@@ -57,15 +58,6 @@ async function gitShow(repo: string, ref: string, file: string): Promise<string 
   } catch { return null; }
 }
 
-interface Snapshot { file: string; content: string | null }
-const snap = (repo: string, files: string[]): Snapshot[] =>
-  files.map((file) => ({ file, content: existsSync(join(repo, file)) ? readFileSync(join(repo, file), "utf8") : null }));
-function restore(repo: string, snaps: Snapshot[]): void {
-  for (const s of snaps) {
-    if (s.content === null) rmSync(join(repo, s.file), { force: true });
-    else writeFileSync(join(repo, s.file), s.content);
-  }
-}
 function writeEdit(repo: string, files: { file: string; content: string }[], deleteFiles: string[]): void {
   for (const f of files) writeFileSync(join(repo, f.file), f.content);
   for (const f of deleteFiles) rmSync(join(repo, f), { force: true });
@@ -122,12 +114,12 @@ export async function applyPlan(opts: {
     const finding = opts.findings[edit.findingIndex]!;
 
     if (edit.action === "restore-from-base") {
-      const before = snap(opts.checkoutDir, [finding.file]);
+      const before = snapshotFiles(opts.checkoutDir, [finding.file]);
       const base = await gitShow(opts.checkoutDir, opts.baseRef, finding.file);
       if (base === null) rmSync(join(opts.checkoutDir, finding.file), { force: true });
       else writeFileSync(join(opts.checkoutDir, finding.file), base);
       const err = await checkTsc(opts.checkoutDir);
-      if (err) { restore(opts.checkoutDir, before); skipped.push({ findingIndex: edit.findingIndex, reason: `restore broke tsc, reverted: ${err.split("\n")[0]}` }); return "skipped"; }
+      if (err) { restoreFiles(opts.checkoutDir, before); skipped.push({ findingIndex: edit.findingIndex, reason: `restore broke tsc, reverted: ${err.split("\n")[0]}` }); return "skipped"; }
       applied.push({ findingIndex: edit.findingIndex, action: edit.action, files: [finding.file], repaired: false });
       return "applied";
     }
@@ -141,10 +133,10 @@ export async function applyPlan(opts: {
       }
       const fixed = applyConventionFix(opts.checkoutDir, finding);
       if (fixed === undefined) { skipped.push({ findingIndex: edit.findingIndex, reason: "mechanical fix changed nothing; refused" }); return "skipped"; }
-      const before = snap(opts.checkoutDir, [finding.file]);
+      const before = snapshotFiles(opts.checkoutDir, [finding.file]);
       writeFileSync(join(opts.checkoutDir, finding.file), fixed);
       const err = await checkTsc(opts.checkoutDir);
-      if (err) { restore(opts.checkoutDir, before); skipped.push({ findingIndex: edit.findingIndex, reason: `convention fix broke tsc, reverted: ${err.split("\n")[0]}` }); return "skipped"; }
+      if (err) { restoreFiles(opts.checkoutDir, before); skipped.push({ findingIndex: edit.findingIndex, reason: `convention fix broke tsc, reverted: ${err.split("\n")[0]}` }); return "skipped"; }
       applied.push({ findingIndex: edit.findingIndex, action: edit.action, files: [finding.file], repaired: false });
       return "applied";
     }
@@ -219,11 +211,11 @@ export async function applyPlan(opts: {
     }
 
     const touched = [...new Set([...result.newFiles.map((f) => f.file), ...result.deleteFiles])];
-    const before = snap(opts.checkoutDir, touched);
+    const before = snapshotFiles(opts.checkoutDir, touched);
     writeEdit(opts.checkoutDir, result.newFiles, result.deleteFiles);
     const err = await checkTsc(opts.checkoutDir);
     if (err) {
-      restore(opts.checkoutDir, before);
+      restoreFiles(opts.checkoutDir, before);
       skipped.push({ findingIndex: edit.findingIndex, reason: `codemod broke tsc, finding skipped (no repair turn): ${err.split("\n")[0]}` });
       return "skipped";
     }

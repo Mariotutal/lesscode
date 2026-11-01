@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { clearBaseTreeCache, clearGateBaselineCache, evaluateCheapGate, evaluateGate, coveringTests, isTestFilePath, repoCommands, treeAt } from "../src/gate/gate.js";
 import { createGuestClient, ModelTimeoutError } from "../src/classify/client.js";
 import { measureSource } from "../src/gate/metrics.js";
-import { buildSymbolGraph } from "../src/gate/symbolGraph.js";
+import { buildSymbolGraph, importersOf, transitiveImports } from "../src/gate/symbolGraph.js";
 
 const exec = promisify(execFile);
 const root = process.cwd();
@@ -56,6 +56,18 @@ describe("symbol graph", () => {
     expect(graph.get("b.ts")!.referencedByOthers.has("formatMoney")).toBe(false);
   });
 
+  it("LES-29: importersOf/transitiveImports answer from the graph, crediting only the resolved file", () => {
+    const graph = buildSymbolGraph(new Map([
+      ["src/a.ts", "export function fmt(n: number) { return '$' + n; }"],
+      ["src/b.ts", "export function fmt(n: number) { return '#' + n; }"],
+      ["src/c.ts", 'import { fmt } from "./a.js";\nexport const out = fmt(1);'],
+      ["src/d.ts", 'import { out } from "./c.js";\nexport const d = out;'],
+    ]));
+    expect(importersOf(graph, "src/a.ts")).toEqual(["src/c.ts"]);
+    expect(importersOf(graph, "src/b.ts")).toEqual([]);
+    expect([...transitiveImports(graph, "src/d.ts")].sort()).toEqual(["src/a.ts", "src/c.ts"]);
+    expect(graph.get("src/c.ts")!.importedFiles.has("src/a.ts")).toBe(true);
+  });
   it("resolves aliased and namespace imports to the declaring file", () => {
     const graph = buildSymbolGraph(new Map([
       ["src/a.ts", "export function helper() { return 1; }"],
