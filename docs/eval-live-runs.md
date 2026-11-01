@@ -2,6 +2,8 @@
 
 Recorded live runs of the eval corpus (`eval/`). Each section is one run: model identifiers, date, and the precision/recall/verdict table. A model change shows up as a diff in these numbers.
 
+The table is the run from that date. The corpus later changed `pre-failing-tests` so a repository whose tests already fail receives `reviewed` and no patch. That later expectation is not written back into the table.
+
 ## 2026-11-01 — spark muse-spark-1.3, wonder muse-wonder-1.0
 
 Run at 2026-11-01T00:47:57.201Z with product calls to https://api.meta.ai/v1 (tool_choice auto).
