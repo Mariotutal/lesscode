@@ -11,6 +11,7 @@ import {
 } from "./schema.js";
 import { decideScopeCreep, exemptScopeCreep, type ScopeCreepFinding } from "./scopeCreep.js";
 import { verifyFindings, type VerificationDrop } from "./verify.js";
+import { addUsage, emptyUsage, hashPrompt, type TokenUsage } from "../manifest.js";
 
 export const REPORT_TOOL = "report_findings";
 
@@ -94,7 +95,9 @@ export interface ClassifyResult {
   rawOutputs: unknown[];
   model: string;
   modelCalls: number;
-  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+  usage?: TokenUsage;
+  /** SHA-256 of each prompt sent (hashes only, never prompt text). */
+  promptHashes: string[];
 }
 
 function systemPrompt(): string {
@@ -166,7 +169,9 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
   const rawOutputs: unknown[] = [];
   let validated: ClassifiedOutput | undefined;
   let lastIssues = "";
-  let usage: ClassifyResult["usage"];
+  const usage = emptyUsage();
+  let sawUsage = false;
+  const promptHashes: string[] = [];
   let modelCalls = 0;
 
   for (let attempt = 0; attempt < 2 && !validated; attempt++) {
@@ -185,9 +190,10 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
                 ".",
             },
           ];
+    promptHashes.push(hashPrompt(messages));
     const result = await client.chat({ messages, tools: [REPORT_TOOL_DEF], toolChoice: "auto" });
     modelCalls++;
-    usage = result.usage ?? usage;
+    if (result.usage) { sawUsage = true; addUsage(usage, result.usage); }
     const raw = extractFindingsJson(result);
     rawOutputs.push(raw);
     const parsed = classifiedOutputSchema.safeParse(raw);
@@ -252,6 +258,7 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
     rawOutputs,
     model: client.config.model,
     modelCalls,
-    usage,
+    usage: sawUsage ? usage : undefined,
+    promptHashes,
   };
 }

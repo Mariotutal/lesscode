@@ -5,6 +5,7 @@ import type { GateResult } from "../gate/gate.js";
 import type { AnyFinding } from "../plan/plan.js";
 import type { ReviewNoteItem } from "../plan/schema.js";
 import { simplify } from "../simplify/simplify.js";
+import type { RunManifest } from "../manifest.js";
 
 export interface ReviewOptions {
   checkout: string;
@@ -36,6 +37,10 @@ export interface ReviewResult {
   verdict: "accepted" | "reviewed" | "failed";
   findings: AnyFinding[];
   gate: GateResult | null;
+  /** LES-26 run manifest from simplify (null when the run failed). */
+  manifest: RunManifest | null;
+  /** Human-readable run rendering from simplify (next to the CLI JSON). */
+  summary: string;
   /** Audit fields carried through from simplify (not part of the public five). */
   detail: {
     reasons: string[];
@@ -136,6 +141,8 @@ export async function review(opts: ReviewOptions): Promise<ReviewResult> {
       verdict: applied ? "accepted" : "reviewed",
       findings: result.findings,
       gate: result.gate,
+      manifest: result.manifest,
+      summary: result.summary,
       detail: {
         reasons,
         droppedFindings: result.droppedFindings,
@@ -152,6 +159,8 @@ export async function review(opts: ReviewOptions): Promise<ReviewResult> {
       verdict: "failed",
       findings: [],
       gate: null,
+      manifest: null,
+      summary: "",
       detail: {
         reasons: [],
         droppedFindings: 0,
