@@ -4,7 +4,8 @@ import { changedFilesFromGit, changedLinesFromGit, matchesIntent, readTsConfig, 
 import type { GateResult } from "../gate/gate.js";
 import type { AnyFinding } from "../plan/plan.js";
 import type { ReviewNoteItem } from "../plan/schema.js";
-import { simplify } from "../simplify/simplify.js";
+import { simplify, type SimplifyResult } from "../simplify/simplify.js";
+type SimplifyResultRecovered = SimplifyResult["recoveredFindings"];
 import type { RunManifest } from "../manifest.js";
 
 export interface ReviewOptions {
@@ -45,6 +46,7 @@ export interface ReviewResult {
   detail: {
     reasons: string[];
     droppedFindings: number;
+    recoveredFindings: SimplifyResultRecovered;
     registry: string[];
     unknownConventions: string[];
     tsConfig: { allowJs: boolean; checkJs: boolean };
@@ -146,6 +148,7 @@ export async function review(opts: ReviewOptions): Promise<ReviewResult> {
       detail: {
         reasons,
         droppedFindings: result.droppedFindings,
+        recoveredFindings: result.recoveredFindings,
         registry: result.registry,
         unknownConventions: result.unknownConventions,
         tsConfig,
@@ -164,6 +167,7 @@ export async function review(opts: ReviewOptions): Promise<ReviewResult> {
       detail: {
         reasons: [],
         droppedFindings: 0,
+        recoveredFindings: [],
         registry: [],
         unknownConventions: [],
         tsConfig,
