@@ -214,7 +214,7 @@ describe("review", () => {
     ]);
     const r = await review({ checkout: dir, base: "base", intent: ["src/report.ts"], sparkClient: client, wonderClient: client });
     expect(r.review.items.map((i) => i.text)).toEqual(["The new renderReceipt duplicates the invoice formatting on the changed lines."]);
-    expect(r.detail.reasons.some((x) => /README\.md.*cannot change behaviour/.test(x)), r.detail.reasons.join("\n")).toBe(true);
+    expect(r.detail.reasons.some((x) => /README\.md is outside the intent and is kept because it is not program source/.test(x)), r.detail.reasons.join("\n")).toBe(true);
     expect(r.findings.some((f) => f.category === "scope-creep" && f.file === "src/extra.ts")).toBe(true);
     expect(r.findings.some((f) => f.file === "README.md" || f.file === "local-scratch.ts")).toBe(false);
     expect(r.applied, r.detail.reasons.join("\n")).toContain("src/extra.ts"); // restored (deleted vs head)

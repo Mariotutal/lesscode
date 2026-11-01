@@ -32,7 +32,7 @@ export interface ScopeCreepInput {
 /** Changed paths kept (not restored) because they cannot change behaviour, with why. */
 export function exemptScopeCreep(input: ScopeCreepInput): { file: string; reason: string }[] {
   return [...input.changedFiles].sort().filter((f) => !matchesIntent(f, input.intentFiles) && isNonBehaviourPath(f))
-    .map((file) => ({ file, reason: `${file} is outside the PR intent but kept: documentation/lockfile paths cannot change behaviour, so it is exempt from restoration` }));
+    .map((file) => ({ file, reason: `${file} is outside the intent and is kept because it is not program source` }));
 }
 
 export function decideScopeCreep(input: ScopeCreepInput): ScopeCreepFinding[] {

@@ -6,7 +6,7 @@ import { classifyFindings } from "../src/classify/classify.js";
 import { changedFilesFromGit, matchesIntent, readTsConfig, scopedReviewFiles } from "../src/classify/checkout.js";
 import type { GuestClient } from "../src/classify/client.js";
 import { filterByEvidence, citationExists, isSealedPath } from "../src/classify/evidence.js";
-import { decideScopeCreep } from "../src/classify/scopeCreep.js";
+import { decideScopeCreep, exemptScopeCreep } from "../src/classify/scopeCreep.js";
 import { classifiedOutputSchema, type Finding } from "../src/classify/schema.js";
 import { applyConventionFix, decideConventionBreak } from "../src/classify/conventionBreak.js";
 import { CONVENTIONS, unknownConventionNames } from "../src/classify/conventions.js";
@@ -365,6 +365,20 @@ describe("LES-25 intent and repository reading", () => {
   it("README/lockfile extras are exempt from restoration, source outside intent is not", () => {
     const out = decideScopeCreep({ changedFiles: ["README.md", "package-lock.json", "src/extra.ts"], intentFiles: ["src/a.ts"] });
     expect(out.map((f) => f.file)).toEqual(["src/extra.ts"]);
+  });
+  it("non-source extras are kept and named in exemptions, program source outside intent is still restored", () => {
+    const kept = [".github/workflows/ci.yml", "package.json", "tsconfig.json", "src/__snapshots__/a.snap", "src/style.scss", "src/template.html", "README.md", "package-lock.json"];
+    const restored = ["src/extra.ts", "src/extra.d.ts"];
+    const changedFiles = [...kept, ...restored];
+    expect(decideScopeCreep({ changedFiles, intentFiles: ["src/a.ts"] }).map((f) => f.file)).toEqual([...restored].sort());
+    const exemptions = exemptScopeCreep({ changedFiles, intentFiles: ["src/a.ts"] });
+    expect(exemptions.map((e) => e.file)).toEqual([...kept].sort());
+    for (const e of exemptions) expect(e.reason).toBe(`${e.file} is outside the intent and is kept because it is not program source`);
+  });
+  it("other non-source categories are exempt, program source extensions are not", () => {
+    const kept = [".circleci/config.yml", ".gitlab-ci.yml", "azure-pipelines.yml", "appveyor.yml", "Jenkinsfile", "pnpm-workspace.yaml", "lerna.json", "nx.json", "jsconfig.json", "tsconfig.build.json", "a/b.snap", "x.css", "x.sass", "x.less", "x.htm", "x.yaml", "x.yml"];
+    const restored = ["x.js", "x.jsx", "x.mjs", "x.cjs", "x.ts", "x.tsx", "x.mts", "x.cts", "x.svelte", "x.vue", "x.d.ts"];
+    expect(decideScopeCreep({ changedFiles: [...kept, ...restored], intentFiles: [] }).map((f) => f.file)).toEqual(restored.sort());
   });
   it("untracked files are not part of the PR, and a commented tsconfig reads as written", async () => {
     const dir = checkout({

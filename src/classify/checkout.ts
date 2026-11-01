@@ -74,11 +74,18 @@ export function expandIntentFiles(files: readonly string[], intent: readonly str
   return files.filter((f) => matchesIntent(f, intent));
 }
 
-/** Paths that cannot change behaviour: exempt from scope-creep restoration by default. */
+/** Paths that are not program source: exempt from scope-creep restoration by default. */
 export function isNonBehaviourPath(file: string): boolean {
   const base = file.split("/").at(-1)!;
   if (/(^|\/)docs?\//.test(file) || /\.(md|mdx|rst|adoc)$/i.test(file) || /^(LICENSE|NOTICE|CHANGELOG)(\.|$)/i.test(base)) return true;
-  return /^(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|Cargo\.lock|Gemfile\.lock|poetry\.lock|composer\.lock|Pipfile\.lock)$/.test(base);
+  if (/^(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|Cargo\.lock|Gemfile\.lock|poetry\.lock|composer\.lock|Pipfile\.lock)$/.test(base)) return true;
+  // CI configuration.
+  if (/(^|\/)\.(github|circleci)\//.test(file) || /^(\.gitlab-ci\.yml|azure-pipelines\.yml|appveyor\.yml|Jenkinsfile)$/.test(base)) return true;
+  // Manifests and compiler configuration (tsconfig.*.json, but not program source such as .d.ts).
+  if (/^(package\.json|pnpm-workspace\.yaml|lerna\.json|nx\.json|jsconfig\.json|tsconfig\.json|tsconfig\..+\.json)$/.test(base)) return true;
+  // Snapshots, styles, templates, and other non-program data.
+  if (file.includes("__snapshots__/") || /\.snap$/i.test(file)) return true;
+  return /\.(css|scss|sass|less|html|htm|yaml|yml)$/i.test(file);
 }
 
 /** Line numbers (new-file side) changed vs `baseRef`, per file, from `git diff -U0`. */
