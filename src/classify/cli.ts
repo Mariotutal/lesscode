@@ -10,7 +10,8 @@ const usage = "Usage: classify --repo <dir> [--base <ref> --intent <f,f>] [--fil
 const args = tryParse(process.argv.slice(2), [{name:"repo",kind:"value",required:true},{name:"base",kind:"value"},{name:"intent",kind:"list"},{name:"files",kind:"list"},{name:"client-fixture",kind:"value"}], usage);
 if (handleHelpOrError(args, usage)) process.exit(0);
 const repo = args.values.get("repo")!;
-const scopeCreep = args.values.has("base") ? { changedFiles: await changedFilesFromGit(repo, args.values.get("base")!), intentFiles: args.lists.get("intent") ?? [] } : undefined;
+const baseRef = args.values.get("base");
+const scopeCreep = baseRef ? { changedFiles: await changedFilesFromGit(repo, baseRef), intentFiles: args.lists.get("intent") ?? [], baseFileText: async (f: string) => { const { execFile } = await import("node:child_process"); const { promisify } = await import("node:util"); try { const { stdout } = await promisify(execFile)("git", ["show", `${baseRef}:${f}`], { cwd: repo, maxBuffer: 64 * 1024 * 1024 }); return stdout; } catch { return null; } } } : undefined;
 let client;
 if (args.values.has("client-fixture")) {
   const bodies = JSON.parse(readFileSync(args.values.get("client-fixture")!, "utf8")) as unknown[];

@@ -9,11 +9,10 @@ import type { Citation, Finding } from "./schema.js";
  * creep — restore it from the base. The model is never consulted for
  * this category and reports no creep itself.
  *
- * Line citations point at the first line of the file, which exists by
- * construction for files present in the checkout (or at line 1 of the
- * base copy for deleted files, where the finding is still kept by the
- * evidence filter because the caller cites the base ref — callers that
- * need strict checkout existence should pass `exists` accordingly).
+ * Line citations point at the first line of the file. The keep/drop
+ * rule lives in classifyFindings (LES-29): a file present in the
+ * checkout is kept outright; a deleted file is kept only when line 1
+ * checks out against the base-ref copy the caller supplies.
  */
 export interface ScopeCreepFinding extends Omit<Finding, "category"> {
   category: "scope-creep";

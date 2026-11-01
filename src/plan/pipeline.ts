@@ -3,6 +3,12 @@ import { changedFilesFromGit, scopedReviewFiles } from "../classify/checkout.js"
 import type { GuestClient } from "../classify/client.js";
 import { createGuestClient } from "../classify/client.js";
 import { evaluateGate, type GateResult } from "../gate/gate.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+const execGit = promisify(execFile);
+async function gitShowFile(repo: string, ref: string, file: string): Promise<string | null> {
+  try { const { stdout } = await execGit("git", ["show", `${ref}:${file}`], { cwd: repo, maxBuffer: 64 * 1024 * 1024 }); return stdout; } catch { return null; }
+}
 import { planOnce, WONDER_MODEL, type PlanResult } from "./plan.js";
 import { applyPlan, type ApplyResult } from "./apply.js";
 
@@ -40,7 +46,7 @@ export async function runPipeline(opts: {
   const classification = await classifyFindings({
     checkoutDir: opts.checkoutDir,
     files: visible,
-    scopeCreep: { changedFiles: changed, intentFiles: opts.intentFiles },
+    scopeCreep: { changedFiles: changed, intentFiles: opts.intentFiles, baseFileText: (f) => gitShowFile(opts.checkoutDir, opts.baseRef, f) },
     client: opts.sparkClient,
   });
 

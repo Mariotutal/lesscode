@@ -1,7 +1,9 @@
 import { createGuestClient, type GuestClient, type ToolDefinition } from "./client.js";
 import { CONVENTIONS, loadRepositoryConventions, unknownConventionNames } from "./conventions.js";
 import { assertFitsWindow, readCheckoutSources, type CheckoutSource } from "./checkout.js";
-import { citationExists, filterByEvidence, isSealedPath } from "./evidence.js";
+import { citationExistsInText, filterByEvidence, isSealedPath, normaliseRepoPath } from "./evidence.js";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { decideConventionBreak, type ConventionDecision } from "./conventionBreak.js";
 import {
   classifiedOutputSchema,
@@ -72,8 +74,8 @@ export interface ClassifyOptions {
   checkoutDir: string;
   /** Restrict classification to these repo-relative files (default: all non-sealed .ts). */
   files?: string[];
-  /** Files changed vs base + PR intent, for the code-decided scope-creep pass. */
-  scopeCreep?: { changedFiles: readonly string[]; intentFiles: readonly string[] };
+  /** Files changed vs base + PR intent, for the code-decided scope-creep pass. `baseFileText` reads a file's base-ref copy (for deleted files); defaults to no base copy. */
+  scopeCreep?: { changedFiles: readonly string[]; intentFiles: readonly string[]; baseFileText?: (file: string) => string | null | Promise<string | null> };
   client?: GuestClient;
 }
 
@@ -233,18 +235,22 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
   const refusedSet = new Set(refusedConventions.map((d) => d.finding));
   const finalModel = kept.filter((f) => !refusedSet.has(f));
 
-  // Scope creep: code-decided, appended after the model pass. Cited at
-  // line 1 — kept by the evidence filter only when that line exists.
-  // A creep file deleted from the checkout cannot cite line 1 of the
-  // checkout; it is still a code-decided restore, so it is kept and the
-  // caller's restore step resolves it against the base ref.
-  let scopeFindings: ScopeCreepFinding[] = [];
+  // Scope creep: code-decided, appended after the model pass. These
+  // findings are kept exactly when the rule that creates them holds:
+  // a file present in the checkout is kept outright (its citation is
+  // line 1); a file deleted from the checkout is kept only when its
+  // citation checks out against the base-ref copy (callers supply
+  // `baseFileText`; without a readable base copy it is dropped).
+  // Sealed paths are never kept.
+  const scopeFindings: ScopeCreepFinding[] = [];
   if (opts.scopeCreep) {
-    scopeFindings = decideScopeCreep(opts.scopeCreep).filter(
-      (f) =>
-        f.citations.every((c) => citationExists(opts.checkoutDir, c)) ||
-        !isSealedPath(f.file),
-    );
+    for (const f of decideScopeCreep(opts.scopeCreep)) {
+      const repoPath = normaliseRepoPath(opts.checkoutDir, f.file);
+      if (repoPath === undefined || isSealedPath(repoPath)) continue;
+      if (existsSync(join(opts.checkoutDir, repoPath))) { scopeFindings.push(f); continue; }
+      const baseText = opts.scopeCreep.baseFileText ? await opts.scopeCreep.baseFileText(repoPath) : null;
+      if (baseText !== null && f.citations.every((c) => citationExistsInText(c, baseText))) scopeFindings.push(f);
+    }
   }
 
   return {

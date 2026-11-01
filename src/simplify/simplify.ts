@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { changedFilesFromGit, contextWindow, estimateTokens, expandIntentFiles, readCheckoutSources, scopedReviewFiles, listClassifiableFiles } from "../classify/checkout.js";
 import type { GuestClient } from "../classify/client.js";
@@ -15,6 +15,7 @@ import { applyPlan } from "../plan/apply.js";
 import { planOnce, WONDER_MODEL, type AnyFinding } from "../plan/plan.js";
 import { ManifestBuilder, renderRunSummary, type RunManifest } from "../manifest.js";
 import type { PlannedEdit, ReviewNoteItem } from "../plan/schema.js";
+import { restoreFiles, snapshotFiles } from "../plan/snapshot.js";
 
 const exec = promisify(execFile);
 
@@ -87,17 +88,6 @@ async function gitShowFile(repo: string, ref: string, file: string): Promise<str
   try { const { stdout } = await exec("git", ["show", `${ref}:${file}`], { cwd: repo, maxBuffer: 64 * 1024 * 1024 }); return stdout; } catch { return null; }
 }
 
-interface Snapshot { file: string; content: string | null }
-function snapshot(repo: string, files: string[]): Snapshot[] {
-  return files.map((file) => ({ file, content: existsSync(join(repo, file)) ? readFileSync(join(repo, file), "utf8") : null }));
-}
-function restoreSnap(repo: string, snaps: Snapshot[]): void {
-  for (const s of snaps) {
-    if (s.content === null) rmSync(join(repo, s.file), { force: true });
-    else { mkdirSync(dirname(join(repo, s.file)), { recursive: true }); writeFileSync(join(repo, s.file), s.content); }
-  }
-}
-
 /**
  * Hide the pipeline behind one function. Spark classifies, Wonder
  * plans once, code applies edits one at a time in a scratch worktree
@@ -142,7 +132,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     const classification = await manifest.time("classify", () => classifyFindings({
       checkoutDir: scratch,
       files: visible,
-      scopeCreep: { changedFiles: changed, intentFiles: opts.intent },
+      scopeCreep: { changedFiles: changed, intentFiles: opts.intent, baseFileText: (f) => gitShowFile(scratch, opts.base, f) },
       client: opts.sparkClient,
     }));
     const findings = classification.findings;
@@ -206,7 +196,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     // dropped edit (e.g. fixture 5's complexity edit) never discards
     // an earlier kept edit.
     const keptEditSet: string[] = [];
-    const restoreFiles = new Set(findings.filter((f) => f.category === "scope-creep").map((f) => f.file));
+    const restoreFileSet = new Set(findings.filter((f) => f.category === "scope-creep").map((f) => f.file));
     const appliedAll: unknown[] = [];
     const skippedAll: { findingIndex: number; reason: string }[] = [];
     let repairCalls = 0;
@@ -220,7 +210,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
         ...edit.newFiles.map((x) => x.file),
         ...edit.deleteFiles,
       ])];
-      const before = snapshot(scratch, [...new Set([...touchedGuess, ...keptEditSet])]);
+      const before = snapshotFiles(scratch, [...new Set([...touchedGuess, ...keptEditSet])]);
       const apply = await manifest.time("apply", () => applyPlan({ checkoutDir: scratch, baseRef: opts.base, findings, edits: [edit], client: wonder }));
       repairCalls += apply.repairCalls;
       skippedAll.push(...apply.skipped);
@@ -246,7 +236,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
       // Split gate: cheap local checks run per edit (they gate keeping
       // this edit); the repository's test/typecheck/lint commands run
       // once on the cumulative kept edits after the loop, not per edit.
-      const gate = await manifest.time("gate", async () => evaluateCheapGate({ repoDir: scratch, baseRef: headSha, editSet: candidateSet, relatedTests, coverageExempt: candidateSet.filter((f) => restoreFiles.has(f)), targetSymbols: await gateTargets(scratch, headSha, candidateSet, findings) }));
+      const gate = await manifest.time("gate", async () => evaluateCheapGate({ repoDir: scratch, baseRef: headSha, editSet: candidateSet, relatedTests, coverageExempt: candidateSet.filter((f) => restoreFileSet.has(f)), targetSymbols: await gateTargets(scratch, headSha, candidateSet, findings) }));
       lastGate = gate;
       // A lone scope-creep restore shrinks nothing by itself; keep it
       // when every non-size check passes. The final cumulative gate
@@ -257,7 +247,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
         keptEditSet.push(...apply.editSet);
         appliedAll.push(...apply.applied);
       } else {
-        restoreSnap(scratch, before);
+        restoreFiles(scratch, before);
         const failed = gate.checks.filter((c) => !c.passed);
         reasons.push(`finding ${edit.findingIndex} (${edit.action}) dropped: gate rejected (${failed.map((c) => c.name).join(", ")})`);
         gateDropped.push({ label: `finding ${edit.findingIndex}: ${edit.action}`, reason: `gate rejected (${failed.map((c) => `${c.name} — ${c.detail}`).join("; ")})` });
@@ -300,7 +290,7 @@ export async function simplify(opts: SimplifyOptions): Promise<SimplifyResult> {
     // the repository's command checks — run once here, in parallel
     // (inside runCommandChecks), on the cumulative kept edits. The
     // merged result is the same combined verdict a full gate gave.
-    const finalCheap = await manifest.time("gate", async () => evaluateCheapGate({ repoDir: scratch, baseRef: headSha, editSet: finalEditSet, relatedTests, coverageExempt: finalEditSet.filter((f) => restoreFiles.has(f)), targetSymbols: await gateTargets(scratch, headSha, finalEditSet, findings) }));
+    const finalCheap = await manifest.time("gate", async () => evaluateCheapGate({ repoDir: scratch, baseRef: headSha, editSet: finalEditSet, relatedTests, coverageExempt: finalEditSet.filter((f) => restoreFileSet.has(f)), targetSymbols: await gateTargets(scratch, headSha, finalEditSet, findings) }));
     const commandGate = await manifest.time("gate", () => evaluateCommandGate({ repoDir: scratch, baseRef: headSha, editSet: finalEditSet, relatedTests }));
     const finalGate: GateResult = {
       accepted: finalCheap.accepted && commandGate.accepted,
