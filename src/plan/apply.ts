@@ -28,6 +28,19 @@ export interface ApplyResult {
 }
 
 async function tscErrors(repo: string): Promise<string | null> {
+  // tsc without a tsconfig prints help and exits 1 — not a failure.
+  // Mirror the gate (repoCommands): only typecheck when the repo
+  // has a tsconfig or a typecheck script; a JavaScript checkout
+  // with neither has no tsc step to break (LES-27 found this: every
+  // codemod edit in a no-tsconfig JS checkout was skipped here).
+  let hasTsc = existsSync(join(repo, "tsconfig.json"));
+  if (!hasTsc) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as { scripts?: Record<string, string> };
+      hasTsc = Boolean(pkg.scripts?.typecheck ?? pkg.scripts?.tsc);
+    } catch { hasTsc = false; }
+  }
+  if (!hasTsc) return null;
   try {
     await exec("npx", ["tsc", "--noEmit"], { cwd: repo, maxBuffer: 64 * 1024 * 1024 });
     return null;
