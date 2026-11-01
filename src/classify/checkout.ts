@@ -246,20 +246,6 @@ export async function changedFilesFromGit(checkoutDir: string, baseRef: string):
   return [...new Set(names)].sort();
 }
 
-/** Read every file present at `ref` in git (for base-tree comparison). */
-export async function treeAtRef(checkoutDir: string, ref: string): Promise<Map<string, string>> {
-  const names = (await git(checkoutDir, ["ls-tree", "-r", "--name-only", ref]))
-    .split("\n")
-    .filter((f) => isSourceFile(f) && !f.includes("node_modules/") && !isSealedPath(f));
-  const out = new Map<string, string>();
-  for (const f of names) out.set(f, await git(checkoutDir, ["show", `${ref}:${f}`]));
-  return out;
-}
-
-export async function worktreeExists(checkoutDir: string, file: string): Promise<boolean> {
-  return existsSync(join(checkoutDir, file));
-}
-
 async function git(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await exec("git", args, { cwd, maxBuffer: 64 * 1024 * 1024 });
   return stdout;

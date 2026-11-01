@@ -260,6 +260,34 @@ describe("scope creep (code-decided)", () => {
     expect(out.map((f) => f.file)).toEqual(["src/logger.ts", "src/styles/footerStyle.ts"]);
     expect(out.every((f) => f.category === "scope-creep" && f.action === "restore-from-base")).toBe(true);
   });
+  it("LES-29: creep in a file present in the checkout is kept; a sealed creep file is not", async () => {
+    const dir = checkout({ "src/kept.ts": "export const k = 1;\n" });
+    const client = stubClient([{ findings: [] }]);
+    const r = await classifyFindings({
+      checkoutDir: dir, client,
+      scopeCreep: { changedFiles: ["src/kept.ts", "fixtures/1/sealed/x.ts"], intentFiles: [], baseFileText: () => "export const x = 1;\n" },
+    });
+    expect(r.findings.map((f) => f.file)).toEqual(["src/kept.ts"]);
+  });
+  it("LES-29: creep in a deleted file is kept only when its citation exists in the base copy", async () => {
+    const dir = checkout({ "src/present.ts": "export const p = 1;\n" });
+    const client = stubClient([{ findings: [] }]);
+    const kept = await classifyFindings({
+      checkoutDir: dir, client,
+      scopeCreep: { changedFiles: ["src/gone.ts"], intentFiles: [], baseFileText: () => "export const g = 1;\n" },
+    });
+    expect(kept.findings.map((f) => f.file)).toEqual(["src/gone.ts"]);
+    const droppedNoBase = await classifyFindings({
+      checkoutDir: dir, client: stubClient([{ findings: [] }]),
+      scopeCreep: { changedFiles: ["src/gone.ts"], intentFiles: [] },
+    });
+    expect(droppedNoBase.findings).toEqual([]);
+    const droppedEmptyBase = await classifyFindings({
+      checkoutDir: dir, client: stubClient([{ findings: [] }]),
+      scopeCreep: { changedFiles: ["src/gone.ts"], intentFiles: [], baseFileText: () => "" },
+    });
+    expect(droppedEmptyBase.findings).toEqual([]);
+  });
   it("classifier appends creep findings without a model category", async () => {
     const dir = checkout({
       "src/components/Button.ts": "export const b = 1;\n",

@@ -25,6 +25,14 @@ function fileLines(checkoutDir: string, repoPath: string): string[] | undefined 
   return readFileSync(abs, "utf8").split("\n");
 }
 
+/** Lines of a citation's file as read from an in-memory text (e.g. `git show <base>:<file>`), or false when the range is outside it. Sealed paths never exist. */
+export function citationExistsInText(c: Citation, text: string): boolean {
+  if (isSealedPath(c.file.replace(/\\/g, "/"))) return false;
+  const lines = text.split("\n");
+  const lastLine = lines.length > 0 && lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
+  return c.startLine >= 1 && c.endLine >= c.startLine && c.endLine <= lastLine;
+}
+
 export function citationExists(checkoutDir: string, c: Citation): boolean {
   const repoPath = normaliseRepoPath(checkoutDir, c.file);
   if (repoPath === undefined || isSealedPath(repoPath)) return false;
@@ -32,8 +40,7 @@ export function citationExists(checkoutDir: string, c: Citation): boolean {
   if (!lines) return false;
   // A trailing "\n" makes split() yield a final empty pseudo-line; a real
   // last line still counts, but nothing beyond the file's last line.
-  const lastLine = lines.length > 0 && lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
-  return c.startLine >= 1 && c.endLine >= c.startLine && c.endLine <= lastLine;
+  return citationExistsInText(c, lines.join("\n"));
 }
 
 /**
