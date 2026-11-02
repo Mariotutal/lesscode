@@ -1,0 +1,304 @@
+{
+  "generatedAt": "2026-11-02T21:51:11.789Z",
+  "mode": "dry-run",
+  "note": "dry-run uses scripted GuestClient, MCP InMemory, and CLI with fake key envelope check; no fixtures/sealed read; enable EVAL_LIVE=1 with real keys for live model",
+  "results": [
+    {
+      "id": "cli-micromark-util-combine-html",
+      "invocation": "cli",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-combine-html",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "df941958e802dae80ebc02bc153655e5a4cd22f5",
+      "actualHeadSha": "ddaa2d348877928b6ec5308e699fff857aef4b34",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "failed",
+        "cli": "failed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": false,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "cli-eventemitter3-once-wrapper",
+      "invocation": "cli",
+      "expected": "reviewed",
+      "bloatKind": "load-bearing-shared",
+      "sourceUrl": "https://github.com/primus/eventemitter3",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "cce878a3183e8a8021ad2792542ae0a19ea85572",
+      "actualHeadSha": "dc5cd91b08df81aa3c3ecbce5fab96a5a6483807",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "failed",
+        "cli": "failed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": false,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "cli-is-number-duplicate",
+      "invocation": "cli",
+      "expected": "accepted",
+      "bloatKind": "duplicate-equivalent",
+      "sourceUrl": "https://github.com/micromatch/is-number",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "b42ad1a92a66443581db11a9cc38c6d2f904873b",
+      "actualHeadSha": "e8bee7d05be17505f16f0bde4df4a72eb8ca3195",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "failed",
+        "cli": "failed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": false,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "mcp-micromark-util-decode-string",
+      "invocation": "mcp",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-decode-string",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "f1b9d7f000452aa9b985b4166891bb36feabf628",
+      "actualHeadSha": "264334024d6fcbe866953bdf04c052694fb1dd02",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "failed",
+        "cli": "failed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": false,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "mcp-eventemitter3-emit-wrapper",
+      "invocation": "mcp",
+      "expected": "reviewed",
+      "bloatKind": "load-bearing-shared",
+      "sourceUrl": "https://github.com/primus/eventemitter3",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "c4d21173ba936ba75e36ddfbd71bdcc19024b557",
+      "actualHeadSha": "078f5bc2ee77af4f0432d064c8e1ebdec1776971",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "failed",
+        "cli": "failed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": false,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "mcp-p-queue-duplicate-not-equivalent",
+      "invocation": "mcp",
+      "expected": "reviewed",
+      "bloatKind": "duplicate-not-equivalent",
+      "sourceUrl": "https://github.com/sindresorhus/p-queue",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "0a4d18c0fe87babf5256649d6f5082505f1e455e",
+      "actualHeadSha": "0ccabfa2f5847f5ffc746ef05dc35988e576cd1c",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "failed",
+        "cli": "failed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": false,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "skill-micromark-util-normalize-identifier",
+      "invocation": "skill",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-normalize-identifier",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "e27fc5f1b081ab217f626c3ca6e1d82b053b610b",
+      "actualHeadSha": "56cc4e9335ff85f83a417dba6f504a630fcd55da",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "failed",
+        "cli": "failed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": false,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "skill-eventemitter3-listeners-wrapper",
+      "invocation": "skill",
+      "expected": "reviewed",
+      "bloatKind": "load-bearing-shared",
+      "sourceUrl": "https://github.com/primus/eventemitter3",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "7aeb5b148940d28aac53e96fa1b8ca78689aa07b",
+      "actualHeadSha": "1297869612f2163b3c0b8b45627edbbff70899c8",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "failed",
+        "cli": "failed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": false,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "skill-is-plain-obj-duplicate-equivalent",
+      "invocation": "skill",
+      "expected": "accepted",
+      "bloatKind": "duplicate-equivalent",
+      "sourceUrl": "https://github.com/sindresorhus/is-plain-obj",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "8317a8a70eba85620fbd49c76ff713b87c937e03",
+      "actualHeadSha": "a44f35542f62dbb9dabbb683352b4e9f8c56ad66",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "failed",
+        "cli": "failed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": false,
+        "cli": true
+      },
+      "sealNeverRead": true
+    }
+  ]
+}
