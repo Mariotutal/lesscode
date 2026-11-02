@@ -128,14 +128,19 @@ export function createReviewService(config: ReviewServiceConfig, dependencies: {
       if (stopped) throw new HttpError(503, "service is stopping");
       const url = new URL(request.url ?? "/", "http://localhost");
       if (url.pathname === "/reviews" && request.method === "POST") {
-        const input = submission(await readBody(request, maxBodyBytes));
+        const raw = await readBody(request, maxBodyBytes) as Record<string, unknown>;
+        // V2 allows checkoutTarUrl/base/intent alongside legacy owner/repo/prNumber/expectedHeadSha; allowlist still enforced.
+        if (raw.checkoutTarUrl !== undefined && (typeof raw.checkoutTarUrl !== "string" || !String(raw.checkoutTarUrl).startsWith("https://"))) throw new HttpError(400, "checkoutTarUrl must be an https URL");
+        const idempotencyKey = String(request.headers["idempotency-key"] ?? request.headers["x-idempotency-key"] ?? "").trim().slice(0, 128);
+        const input = submission(raw);
         if (!allowed.has(`${input.owner}/${input.repo}`.toLowerCase())) throw new HttpError(403, "repository is not allowed");
         const prior = store.find(input);
-        if (prior) { respond(response, 200, prior); return; }
+        if (prior) { respond(response, 200, { ...prior, reviewRunId: prior.id }); return; }
         if (queue.length >= maxQueued) throw new HttpError(503, "review queue is full");
         const { job } = store.create(input);
+        if (idempotencyKey) (job as unknown as Record<string, unknown>).idempotencyKey = idempotencyKey;
         queue.push(job.id);
-        respond(response, 202, job);
+        respond(response, 202, { ...job, reviewRunId: job.id });
         pump();
         return;
       }

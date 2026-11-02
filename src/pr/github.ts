@@ -249,7 +249,9 @@ export async function runGithubPrReview(opts: GithubPrReviewOptions): Promise<Gi
     const ownedByPublisher = (item: Obj): boolean => Boolean(publisher && ((publisher.appId && (asObj(item.app).id === publisher.appId || asObj(item.performed_via_github_app).id === publisher.appId)) || (publisher.actorId && (asObj(item.user).id === publisher.actorId || asObj(item.creator).id === publisher.actorId))));
     const checkRuns = await allPages(opts.api, `/repos/${slug}/commits/${identity.headSha}/check-runs`, "check_runs");
     const priorCheck = checkRuns.find((item) => item.name === CHECK_NAME && ownedByPublisher(item));
-    const payload = { name: CHECK_NAME, head_sha: identity.headSha, status: "completed", conclusion: check.conclusion, output: { title: `LessCode review: ${check.conclusion}`, summary: check.body } };
+    // Branch protection signal: neutral for reviewed (no gate), failure for failed; success only on accepted gate.
+    const conclusion = check.conclusion === "success" ? "success" : check.conclusion === "neutral" ? "neutral" : "failure";
+    const payload = { name: CHECK_NAME, head_sha: identity.headSha, status: "completed", conclusion, output: { title: `LessCode review: ${conclusion}`, summary: check.body } };
     await assertCurrent();
     const postedCheck = await opts.api.request(priorCheck
       ? { method: "PATCH", path: `/repos/${slug}/check-runs/${String(priorCheck.id)}`, body: payload }
