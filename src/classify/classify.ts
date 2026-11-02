@@ -1,4 +1,5 @@
-import { createGuestClient, type GuestClient, type ToolDefinition } from "./client.js";
+import { createModelClient } from "../provider/factory.js";
+import type { GuestClient, ToolDefinition } from "../provider/types.js";
 import { CONVENTIONS, loadRepositoryConventions, unknownConventionNames } from "./conventions.js";
 import { assertFitsWindow, readCheckoutSources, type CheckoutSource } from "./checkout.js";
 import { citationExistsInText, isSealedPath, normaliseRepoPath } from "./evidence.js";
@@ -165,7 +166,7 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
   if (isSealedPath(opts.checkoutDir)) throw new Error("refusing to classify a sealed directory");
   const files = opts.files?.filter((f) => !isSealedPath(f));
   const sources = readCheckoutSources(opts.checkoutDir, files);
-  const client = opts.client ?? createGuestClient();
+  const client = opts.client ?? createModelClient("spark");
 
   const prompt = sources.map(numberedSource).join("\n\n");
   const baseMessages = [

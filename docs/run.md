@@ -6,7 +6,7 @@ Use this for a repository you trust. Repository commands run on your machine, wi
 
 ```bash
 npm install
-META_API_KEY=... npm run review -- --repo <dir> --base <ref> --intent src/a.ts,src/b.ts [--tests tests]
+LESSCODE_API_KEY=... npm run review -- --repo <dir> --base <ref> --intent src/a.ts,src/b.ts [--tests tests]
 ```
 
 `--intent` is the files the change claimed to touch. `--tests` defaults to `tests`. `--execution docker` runs repository commands in a container instead; the image must already exist.
@@ -15,7 +15,7 @@ META_API_KEY=... npm run review -- --repo <dir> --base <ref> --intent src/a.ts,s
 docker build -f docker/runner.Dockerfile -t lesscode-runner:local .
 ```
 
-The model endpoint is `https://api.meta.ai/v1`. `META_API_KEY` is required (`MODEL_API_KEY` and `META_AI_API_KEY` are accepted aliases). `META_API_BASE_URL` overrides the endpoint. Spark is `muse-spark-1.3`. Wonder is `muse-wonder-1.0`, and the engine selects it for the single planning call.
+The model endpoint defaults to `https://api.meta.ai/v1` but any OpenAI-compatible endpoint works. Set `LESSCODE_API_KEY` (canonical) and optionally `LESSCODE_API_BASE_URL`, `LESSCODE_SPARK_MODEL`, `LESSCODE_WONDER_MODEL`, or per-role `LESSCODE_SPARK_API_KEY`/`LESSCODE_WONDER_API_KEY`. Deprecated aliases `META_API_KEY`/`MODEL_API_KEY`/`META_AI_API_KEY`, `META_API_BASE_URL`, and `META_MODEL` still work and warn. Default Spark is `muse-spark-1.3` and Wonder is `muse-wonder-1.0`, selected by the engine for the single planning call.
 
 ## Review a GitHub pull request
 
@@ -36,7 +36,7 @@ LESSCODE_SERVICE_TOKEN=... \
 LESSCODE_RUNNER_IMAGE=lesscode-runner:local \
 LESSCODE_ALLOWED_REPOS=owner/repo \
 GITHUB_TOKEN=... \
-META_API_KEY=... \
+LESSCODE_API_KEY=... \
 npm run service
 ```
 

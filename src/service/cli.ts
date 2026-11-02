@@ -13,7 +13,7 @@ try {
   const token = required("LESSCODE_SERVICE_TOKEN");
   const image = required("LESSCODE_RUNNER_IMAGE");
   const githubToken = required("GITHUB_TOKEN");
-  const metaApiKey = required("META_API_KEY");
+  const metaApiKey = process.env.LESSCODE_API_KEY?.trim() || required("META_API_KEY");
   const service = createReviewService({
     token, image,
     allowedRepositories: required("LESSCODE_ALLOWED_REPOS").split(",").map((repo) => repo.trim()).filter(Boolean),

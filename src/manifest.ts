@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ChatMessage } from "./classify/client.js";
+import type { ChatMessage } from "./provider/types.js";
 
 /**
  * Run manifest (LES-26): returned with every simplify/review result.

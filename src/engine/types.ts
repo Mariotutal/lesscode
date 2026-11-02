@@ -1,4 +1,4 @@
-import type { GuestClient } from "../classify/client.js";
+import type { GuestClient } from "../provider/types.js";
 import type { RecoveredFinding } from "../classify/recover.js";
 import type { GateResult } from "../gate/gate.js";
 import type { RunManifest } from "../manifest.js";

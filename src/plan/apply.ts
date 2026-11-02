@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { GuestClient } from "../classify/client.js";
+import type { GuestClient } from "../provider/types.js";
 import { applyConventionFixAsync } from "../classify/conventionBreak.js";
 import { loadRepositoryConventions } from "../classify/conventions.js";
 import { isSealedPath, normaliseRepoPath } from "../classify/evidence.js";
