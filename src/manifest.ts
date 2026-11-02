@@ -16,12 +16,18 @@ export interface TokenUsage {
 export interface ModelPricing { inputPerMtok?: number; outputPerMtok?: number }
 
 /** Derived cost in USD. Present only when a pricing entry matched a model that reported usage. */
+export interface CostEntry { model: string; pricingSource: "custom" | "default"; inputPerMtok?: number; outputPerMtok?: number; inputUsd: number; outputUsd: number; totalUsd: number; promptTokens: number; completionTokens: number }
+export interface UnpricedEntry { role: "spark" | "wonder"; model: string; promptTokens: number; completionTokens: number; totalTokens: number; reason: string }
 export interface RunCost {
   currency: "USD";
   inputUsd: number;
   outputUsd: number;
   totalUsd: number;
   byRole: { spark?: { inputUsd: number; outputUsd: number; totalUsd: number }; wonder?: { inputUsd: number; outputUsd: number; totalUsd: number } };
+  completeness: "complete" | "partial" | "unknown";
+  priced: CostEntry[];
+  unpriced: UnpricedEntry[];
+  pricingVersion?: string;
 }
 
 /**
@@ -35,14 +41,22 @@ export const DEFAULT_PRICING: Record<string, ModelPricing> = {
   "muse-wonder-1.0": { inputPerMtok: 3, outputPerMtok: 15 },
 };
 
+function validFinite(n: unknown): n is number { return typeof n === "number" && Number.isFinite(n) && n >= 0; }
 /** Price one role's usage; undefined when no rate is known for the model. */
 export function priceUsage(model: string | undefined, usage: TokenUsage, pricing?: Record<string, ModelPricing>): RunCost["byRole"]["spark"] | undefined {
   if (!model || (usage.prompt_tokens === 0 && usage.completion_tokens === 0)) return undefined;
+  if (!validFinite(usage.prompt_tokens) || !validFinite(usage.completion_tokens)) return undefined;
   const rate = pricing?.[model] ?? DEFAULT_PRICING[model];
   if (!rate || (rate.inputPerMtok === undefined && rate.outputPerMtok === undefined)) return undefined;
+  if ((rate.inputPerMtok !== undefined && !validFinite(rate.inputPerMtok)) || (rate.outputPerMtok !== undefined && !validFinite(rate.outputPerMtok))) return undefined;
+  // partial rates: price only known side, caller decides completeness
   const inputUsd = (usage.prompt_tokens / 1_000_000) * (rate.inputPerMtok ?? 0);
   const outputUsd = (usage.completion_tokens / 1_000_000) * (rate.outputPerMtok ?? 0);
   return { inputUsd, outputUsd, totalUsd: inputUsd + outputUsd };
+}
+// helper for RunCost building
+function pricingSource(model: string, pricing?: Record<string, ModelPricing>): "custom" | "default" | undefined {
+  if (pricing?.[model]) return "custom"; if (DEFAULT_PRICING[model]) return "default"; return undefined;
 }
 
 export interface RunManifest {
@@ -92,12 +106,18 @@ export class ManifestBuilder {
   readonly responseModels: { spark?: string; wonder?: string } = {};
   readonly usageByRole: Record<"spark" | "wonder", TokenUsage> = { spark: emptyUsage(), wonder: emptyUsage() };
   readonly pricingByRole: Record<"spark" | "wonder", Record<string, ModelPricing> | undefined> = { spark: undefined, wonder: undefined };
+  // per-call attribution: each call keeps its served model so retries with different model ids don't overwrite
+  readonly calls: { role: "spark" | "wonder"; model: string; usage: TokenUsage; hasUsage: boolean }[] = [];
+  readonly pricingVersion = "lesscode-pricing-v1";
 
   /** Record one response: aggregate + per-role usage, and the provider-returned model id. */
   recordResponse(role: "spark" | "wonder", usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }, responseModel?: string): void {
-    addUsage(this.usage, usage);
-    addUsage(this.usageByRole[role], usage);
+    const hasUsage = usage != null && (usage.prompt_tokens !== undefined || usage.completion_tokens !== undefined || usage.total_tokens !== undefined);
+    if (hasUsage) { addUsage(this.usage, usage); addUsage(this.usageByRole[role], usage); }
     if (responseModel) this.responseModels[role] = responseModel;
+    const effective = responseModel ?? (role === "spark" ? this.sparkModel : this.wonderModel);
+    const norm: TokenUsage = { prompt_tokens: validFinite(usage?.prompt_tokens) ? usage!.prompt_tokens! : 0, completion_tokens: validFinite(usage?.completion_tokens) ? usage!.completion_tokens! : 0, total_tokens: validFinite(usage?.total_tokens) ? usage!.total_tokens! : ((usage?.prompt_tokens ?? 0)+(usage?.completion_tokens ?? 0)) };
+    this.calls.push({ role, model: effective || "unknown", usage: norm, hasUsage: !!hasUsage && (validFinite(usage?.prompt_tokens) || validFinite(usage?.completion_tokens) || validFinite(usage?.total_tokens)) });
   }
 
   setPricing(role: "spark" | "wonder", pricing?: Record<string, ModelPricing>): void {
@@ -121,15 +141,34 @@ export class ManifestBuilder {
     this.phasesMs.overhead = Math.max(0, totalMs - measured);
     const byRole: RunCost["byRole"] = {};
     const pricing: NonNullable<RunManifest["pricing"]> = {};
-    for (const role of ["spark", "wonder"] as const) {
+    const priced: CostEntry[] = [];
+    const unpriced: UnpricedEntry[] = [];
+    // aggregate by role+model from per-call evidence
+    const grouped = new Map<string, { role:"spark"|"wonder"; model:string; usage:TokenUsage }>();
+    for (const c of this.calls) if (c.hasUsage) { const k=`${c.role}|${c.model}`; const g=grouped.get(k) ?? { role:c.role, model:c.model, usage:emptyUsage()}; addUsage(g.usage,c.usage); grouped.set(k,g); }
+    // also detect roles that had calls but no usage reported -> they are absent usage, not zero
+    for (const role of ["spark","wonder"] as const) {
       const effective = this.responseModels[role] ?? (role === "spark" ? this.sparkModel : this.wonderModel);
-      const rate = this.pricingByRole[role]?.[effective] ?? DEFAULT_PRICING[effective];
+      const rate = effective ? (this.pricingByRole[role]?.[effective] ?? DEFAULT_PRICING[effective]) : undefined;
       if (rate) pricing[role] = rate;
-      const priced = priceUsage(effective, this.usageByRole[role], this.pricingByRole[role]);
-      if (priced) byRole[role] = priced;
     }
-    const cost: RunCost | undefined = Object.keys(byRole).length
-      ? { currency: "USD", inputUsd: (byRole.spark?.inputUsd ?? 0) + (byRole.wonder?.inputUsd ?? 0), outputUsd: (byRole.spark?.outputUsd ?? 0) + (byRole.wonder?.outputUsd ?? 0), totalUsd: (byRole.spark?.totalUsd ?? 0) + (byRole.wonder?.totalUsd ?? 0), byRole }
+    for (const g of grouped.values()) {
+      const rolePricing = this.pricingByRole[g.role];
+      const rate = rolePricing?.[g.model] ?? DEFAULT_PRICING[g.model];
+      if (!rate || (rate.inputPerMtok===undefined && rate.outputPerMtok===undefined)) { unpriced.push({ role:g.role, model:g.model, promptTokens:g.usage.prompt_tokens, completionTokens:g.usage.completion_tokens, totalTokens:g.usage.total_tokens, reason:"unknown model rate"}); continue; }
+      if (g.usage.prompt_tokens>0 && rate.inputPerMtok===undefined) { unpriced.push({ role:g.role, model:g.model, promptTokens:g.usage.prompt_tokens, completionTokens:0, totalTokens:g.usage.prompt_tokens, reason:"missing input rate"}); }
+      if (g.usage.completion_tokens>0 && rate.outputPerMtok===undefined) { unpriced.push({ role:g.role, model:g.model, promptTokens:0, completionTokens:g.usage.completion_tokens, totalTokens:g.usage.completion_tokens, reason:"missing output rate"}); }
+      const src = pricingSource(g.model, rolePricing)!;
+      const inputUsd = g.usage.prompt_tokens>0 && rate.inputPerMtok!==undefined ? (g.usage.prompt_tokens/1e6)*rate.inputPerMtok : 0;
+      const outputUsd = g.usage.completion_tokens>0 && rate.outputPerMtok!==undefined ? (g.usage.completion_tokens/1e6)*rate.outputPerMtok : 0;
+      if (inputUsd||outputUsd) priced.push({ model:g.model, pricingSource:src, inputPerMtok:rate.inputPerMtok, outputPerMtok:rate.outputPerMtok, inputUsd, outputUsd, totalUsd: inputUsd+outputUsd, promptTokens:g.usage.prompt_tokens, completionTokens:g.usage.completion_tokens});
+      else if (g.usage.prompt_tokens===0 && g.usage.completion_tokens===0) { /* zero usage: no entry */ }
+    }
+    for (const e of priced) { const role = [...grouped.values()].find(v=>v.model===e.model)?.role; if(!role) continue; const cur=byRole[role]??{inputUsd:0,outputUsd:0,totalUsd:0}; cur.inputUsd+=e.inputUsd; cur.outputUsd+=e.outputUsd; cur.totalUsd+=e.totalUsd; byRole[role]=cur; }
+    const hasBillableUsage = grouped.size>0 && [...grouped.values()].some(g=>g.usage.prompt_tokens>0||g.usage.completion_tokens>0);
+    const completeness: RunCost["completeness"] = !hasBillableUsage ? "unknown" : unpriced.length ? "partial" : "complete";
+    const cost: RunCost | undefined = priced.length || unpriced.length
+      ? { currency: "USD", inputUsd: priced.reduce((s,e)=>s+e.inputUsd,0), outputUsd: priced.reduce((s,e)=>s+e.outputUsd,0), totalUsd: priced.reduce((s,e)=>s+e.totalUsd,0), byRole, completeness, priced, unpriced, pricingVersion: this.pricingVersion }
       : undefined;
     return {
       models: { spark: this.sparkModel, wonder: this.wonderModel },
@@ -176,7 +215,7 @@ export function renderRunSummary(s: HumanRunSummary): string {
     "",
     `Models: spark=${m.models.spark}, wonder=${m.models.wonder}; calls=${m.modelCalls} (spark ${m.callsByModel.spark}, wonder ${m.callsByModel.wonder})`,
     `Tokens: prompt=${m.usage.prompt_tokens}, completion=${m.usage.completion_tokens}, total=${m.usage.total_tokens}`,
-    ...(m.cost ? [`Cost: $${m.cost.totalUsd.toFixed(6)} (input $${m.cost.inputUsd.toFixed(6)}, output $${m.cost.outputUsd.toFixed(6)})`] : []),
+    ...(m.cost ? [m.cost.completeness === "complete" ? `Cost (estimated, ${m.cost.pricingVersion}): $${m.cost.totalUsd.toFixed(6)} (input $${m.cost.inputUsd.toFixed(6)}, output $${m.cost.outputUsd.toFixed(6)})` : `Cost (estimated, partial — known subtotal $${m.cost.totalUsd.toFixed(6)}; unpriced: ${m.cost.unpriced.map(u=>`${u.role}/${u.model} ${u.reason}`).join(", ")})`] : []),
     ...(m.responseModels.spark || m.responseModels.wonder ? [`Response models: spark=${m.responseModels.spark ?? "(none reported)"}, wonder=${m.responseModels.wonder ?? "(none reported)"}`] : []),
     `Phases: ${Object.entries(m.phasesMs).map(([phase, duration]) => `${phase}=${ms(duration)}`).join(", ")}, total=${ms(m.totalMs)}`,
     `Prompt hashes: ${m.promptHashes.length ? m.promptHashes.join(", ") : "(none)"}`,
