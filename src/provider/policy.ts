@@ -33,7 +33,8 @@ export function validateUrlSecurity(baseUrl: string): void {
 }
 
 export function hashPolicy(policy: TrustedPolicy): string {
-  return createHash("sha256").update(JSON.stringify(policy)).digest("hex").slice(0, 16);
+  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : value;
+  return createHash("sha256").update(JSON.stringify(canonical(policy))).digest("hex");
 }
 
 /** Backwards-compatible no-op; policy snapshots are owned by each run. */

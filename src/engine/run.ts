@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { classifyFindings } from "../classify/classify.js";
 import { createModelClient } from "../provider/factory.js";
 import { hashPolicy, loadTrustedPolicy } from "../provider/policy.js";
@@ -93,15 +93,17 @@ export async function runReview(opts: ReviewRequest): Promise<RunRecord> {
     runSync: (command) => { opts.signal?.throwIfAborted(); return execution.runSync(command); },
     dispose: () => execution.dispose(),
   };
-  const trustedPolicy = loadTrustedPolicy();
+  const providerEnv = { ...process.env };
   const record: RunRecord = { schemaVersion: 1, runId: randomUUID(), state: "completed", verdict: "reviewed", outcome: "no-change", revision: null,
-    execution: { kind: executor.kind, policyVersion: trustedPolicy ? 2 : 1, ...(trustedPolicy ? { policyHash: hashPolicy(trustedPolicy) } : {}) }, findings: [], findingIds: [], edits: [], gate: null,
+    execution: { kind: executor.kind, policyVersion: 1 }, findings: [], findingIds: [], edits: [], gate: null,
     verification: { status: "not-run", treeHash: null }, artifact: null, review: { items: [], markdown: "" }, manifest: manifest.build(), audit: emptyAudit(), failure: null };
   let stage = "resolve";
   let workspace: Awaited<ReturnType<typeof openWorkspace>> | undefined;
   const texts = new Map<string, string>();
   let changedLines = new Map<string, Set<number>>(), intentChanged = false;
   try {
+    const trustedPolicy = loadTrustedPolicy(providerEnv);
+    if (trustedPolicy) Object.assign(record.execution, { policyVersion: 2, policyHash: hashPolicy(trustedPolicy) });
     const scope = opts.scope ?? { kind: "declared" as const, paths: opts.intent };
     if (scope.kind === "declared" && !scope.paths.length) throw new Error("intent is required: the list of files the change claimed to touch");
     opts.signal?.throwIfAborted();
@@ -121,8 +123,18 @@ export async function runReview(opts: ReviewRequest): Promise<RunRecord> {
     if (preparationChanges.length) throw new Error(`dependency preparation changed the source snapshot: ${preparationChanges.join(", ")}`);
     let visible = scopedReviewFiles(repo, { intentFiles: intent, changedFiles: changed, relatedTests });
     const trustedCwd = executor.kind === "trusted-local";
-    const fileConfig = loadLesscodeConfig(repo).config;
-    const spark = instrument(opts.sparkClient ?? createModelClient("spark", { env: process.env, trustedPolicy, fileConfig, cwd: repo, trusted: trustedCwd }), "spark", manifest, opts.signal);
+    const fileConfig = opts.sparkClient && opts.wonderClient ? null : loadLesscodeConfig(repo, { rootDir: repo }).config;
+    const clientOptions = { env: providerEnv, trustedPolicy, fileConfig, cwd: repo, trusted: trustedCwd };
+    // Resolve both roles before Spark; an invalid Wonder policy must make zero model calls.
+    const sparkClient = opts.sparkClient ?? createModelClient("spark", clientOptions);
+    const wonderClient = opts.wonderClient ?? createModelClient("wonder", clientOptions);
+    record.execution.configSource = opts.sparkClient && opts.wonderClient ? 'injected' : trustedPolicy ? 'trusted-policy' : trustedCwd && fileConfig ? 'trusted-local' : 'operator-environment';
+    record.execution.configHash = createHash('sha256').update(JSON.stringify([sparkClient, wonderClient].map(client => ({ provider: client.config.provider, model: client.config.model, baseUrl: client.config.baseUrl, pricing: Object.entries(client.config.pricing ?? {}).sort(([a], [b]) => a.localeCompare(b)) })))).digest('hex');
+    record.execution.models = {
+      spark: { model: sparkClient.config.model, provider: sparkClient.config.provider },
+      wonder: { model: wonderClient.config.model, provider: wonderClient.config.provider },
+    };
+    const spark = instrument(sparkClient, "spark", manifest, opts.signal);
     const seeds = new Set([...expandIntentFiles(listClassifiableFiles(repo), intent), ...changed]);
     while (visible.length && !seeds.has(visible.at(-1)!) && estimateTokens(readCheckoutSources(repo, visible).map((s) => s.text).join("\n")) > contextWindow(spark.config.model)) visible = visible.slice(0, -1);
     for (const source of readCheckoutSources(repo, visible)) texts.set(source.file, source.text);
@@ -138,7 +150,7 @@ export async function runReview(opts: ReviewRequest): Promise<RunRecord> {
       unknownConventions: classification.unknownConventions, refusedConventions: classification.refusedConventions.map((d) => ({ convention: d.finding.convention ?? "(none)", file: d.finding.file, citations: d.finding.citations, rationale: d.status === "refused" ? d.reason : d.finding.rationale })) });
     record.audit.reasons.push(...classification.scopeExemptions.map((e) => e.reason), ...classification.verificationDropped.map((d) => `finding for ${d.finding.file} kept out of the patch: ${d.reason}`), ...classification.unknownConventions.map((name) => `unknown convention "${name}" in lesscode-conventions.json: ignored`));
     stage = "plan";
-    const wonder = instrument(opts.wonderClient ?? createModelClient("wonder", { env: process.env, trustedPolicy, fileConfig, cwd: repo, trusted: trustedCwd }), "wonder", manifest, opts.signal);
+    const wonder = instrument(wonderClient, "wonder", manifest, opts.signal);
     const plan = await manifest.time("plan", () => planOnce({ checkoutDir: repo, findings: record.findings, files: visible, changedFiles: changed, baseRef: base, client: wonder }));
     record.audit.plan = { edits: plan.edits.length, skipped: plan.skipped, model: plan.model, modelCalls: plan.modelCalls, usage: plan.usage, review: plan.review };
     for (const skip of plan.skipped) record.edits.push({ findingId: record.findingIds[skip.findingIndex] ?? `unknown-${skip.findingIndex}`, findingIndex: skip.findingIndex, action: "skip", status: "skipped", files: [], reason: reason("planner-skip", "plan", skip.reason) });

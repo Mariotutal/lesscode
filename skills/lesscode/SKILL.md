@@ -1,7 +1,8 @@
 ---
 name: lesscode
 description: Run LessCode review or simplify-tool on the current checkout and return the JSON result path without inventing a verdict.
-allowed-tools: Read, Bash, Grep, Glob, Edit, Write
+compatibility: Requires Node.js 22+, Git and a built LessCode installation on PATH. Docker mode requires an approved runner image.
+allowed-tools: Read Bash
 ---
 
 # LessCode Skill
@@ -10,12 +11,11 @@ Use this skill to run LessCode from an agent. Do not invent a verdict — read t
 
 ## Instructions
 
-1. Resolve model config via Factory `LESSCODE_*` env and an optional committed `.lesscode.json` (`apiKeyEnv` only, never a literal key).
-2. Run `node scripts/lesscode.mjs review --out <path>` or `tool --out <path>`. The CLI writes a deterministic `.lesscode.json` and the requested result JSON.
-3. Return the JSON path to the caller; do not summarize a verdict yourself. The engine is the source of truth.
+1. Use operator-provided configuration; never rewrite `.lesscode.json` or store credentials.
+2. Run `lesscode review --repo <checkout> --base <ref> --intent <files> --out <result.json>`. For untrusted source add `--execution docker --runner-image <operator-approved-image>`.
+3. Read the generated RunRecord. Exit 0 means accepted, 1 means reviewed (successful note-only outcome), 2 means failed. A path alone is not proof of success: inspect verdict, state and failure.
+4. Return the JSON path and recorded verdict. Apply patches only when authorized by the user.
 
 ## References
 
-- `docs/consumers.md` — consumer integrations
-- `docs/run.md` — run modes and config
-- `scripts/lesscode.mjs` — CLI wrapper
+- Run `lesscode --help` for the installed command contract. This skill can be copied independently and depends on the installed executable.

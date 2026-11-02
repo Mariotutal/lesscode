@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, join, parse } from "node:path";
+import { dirname, join, resolve, relative, isAbsolute } from "node:path";
 import { z } from "zod";
 
 /**
@@ -70,8 +70,12 @@ function safeIssue(e: z.ZodError): string {
  * a per-repo file found by walking to the repo root. The walk never
  * descends into a `sealed/` directory and never reads one inside it.
  */
-export function findLesscodeConfigPath(startDir: string): string | null {
-  let dir = startDir;
+export function findLesscodeConfigPath(startDir: string, rootDir?: string): string | null {
+  let dir = resolve(startDir);
+  if (isSealedPath(dir)) return null;
+  const root = rootDir ? realpathSync(rootDir) : undefined;
+  const inside = (path: string) => { const rel = root ? relative(root, path) : ""; return !isAbsolute(rel) && rel !== ".." && !rel.startsWith("../"); };
+  if (root && !inside(realpathSync(dir))) throw new Error("configuration start is outside approved root");
   for (;;) {
     if (!isSealedPath(dir)) {
       const candidate = join(dir, CONFIG_FILE_NAME);
@@ -79,11 +83,13 @@ export function findLesscodeConfigPath(startDir: string): string | null {
         // Resolve symlinks so a link into a sealed tree is still refused.
         let real = candidate;
         try { real = realpathSync(candidate); } catch { /* keep lexical path */ }
-        if (!isSealedPath(real)) return candidate;
+        if (!isSealedPath(real) && inside(real)) return candidate;
+        throw new Error("configuration symlink escapes approved root or enters sealed path");
       }
     }
     const parent = dirname(dir);
-    if (parent === dir || parent === parse(dir).root) return null;
+    if (root ? realpathSync(dir) === root : existsSync(join(dir, ".git"))) return null;
+    if (parent === dir) return null;
     dir = parent;
   }
 }
@@ -96,9 +102,8 @@ export function clearLesscodeConfigCache(): void { }
  * an error ({path:null}); each call reads current filesystem state.
  * Malformed JSON / schema violations throw a secret-free error.
  */
-export function loadLesscodeConfig(startDir: string, _opts?: { noCache?: boolean }): LoadedLesscodeConfig {
-  void _opts;
-  const path = findLesscodeConfigPath(startDir);
+export function loadLesscodeConfig(startDir: string, opts?: { noCache?: boolean; rootDir?: string }): LoadedLesscodeConfig {
+  const path = findLesscodeConfigPath(startDir, opts?.rootDir);
   let loaded: LoadedLesscodeConfig = { path, config: null };
   if (path) {
     if (!statSync(path).isFile()) throw new Error(`${CONFIG_FILE_NAME} at ${path} is not a file`);

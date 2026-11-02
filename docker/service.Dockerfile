@@ -14,6 +14,7 @@ WORKDIR /app
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+RUN mkdir -p /data && chown node:node /data
 USER node
 ENV HOST=0.0.0.0 PORT=8787
 EXPOSE 8787

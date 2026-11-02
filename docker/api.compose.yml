@@ -1,0 +1,23 @@
+# Deploy on the API host. No Docker socket or model/GitHub credentials.
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/service.Dockerfile
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp:size=64m]
+    ports: [127.0.0.1:8787:8787]
+    volumes: [api-data:/data]
+    environment:
+      LESSCODE_HOST: 0.0.0.0
+      LESSCODE_DATA_DIR: /data
+      LESSCODE_SERVICE_TOKEN: ${LESSCODE_SERVICE_TOKEN:?required}
+      LESSCODE_WORKER_URL: ${LESSCODE_WORKER_URL:?private HTTPS worker endpoint required}
+      LESSCODE_WORKER_TOKEN: ${LESSCODE_WORKER_TOKEN:?required}
+      LESSCODE_ALLOWED_REPOS: ${LESSCODE_ALLOWED_REPOS:?required}
+      LESSCODE_RUNNER_IMAGE: delegated-to-worker
+volumes:
+  api-data:

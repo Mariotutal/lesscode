@@ -1,163 +1,90 @@
-import { runReview } from "../engine/run.js";
+import { timingSafeEqual } from 'node:crypto';
+import { realpathSync } from 'node:fs';
+import { relative, isAbsolute } from 'node:path';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { reviewArgumentsSchema, runRecordSchema } from '../contracts/review.js';
+import { runReview } from '../engine/run.js';
+import type { ReviewRequest } from '../engine/types.js';
+import { createDockerExecutor } from '../execution/index.js';
 
-type JsonObject = Record<string, unknown>;
-type RpcResponse = JsonObject;
-type RpcResult = RpcResponse | Promise<RpcResponse | null> | null;
-type HttpRequest = AsyncIterable<string | Buffer> & { headers?: Record<string, unknown> };
-type HttpResponse = { writeHead: (status: number, headers?: Record<string, string>) => void; end: (body?: string) => void };
-
-const TOOL_NAME = "review_change";
-
-const inputSchema = {
-  type: "object",
-  required: ["checkout", "base", "intent"],
-  properties: {
-    checkout: { type: "string" },
-    base: { type: "string" },
-    intent: { type: "array", items: { type: "string" } },
-  },
-  additionalProperties: false,
-} as const;
-
-const outputSchema = {
-  type: "object",
-  required: ["verdict", "runId", "revision", "gate", "review", "artifact", "manifest"],
-  properties: {
-    verdict: { type: "string" },
-    runId: { type: "string" },
-    revision: { type: "object" },
-    gate: { type: ["object", "null"] },
-    review: { type: "object" },
-    artifact: { type: ["object", "null"] },
-    manifest: { type: "object" },
-  },
-} as const;
-
-function buildOutput(record: Awaited<ReturnType<typeof runReview>>) {
-  return {
-    verdict: record.verdict,
-    runId: record.runId,
-    revision: record.revision,
-    gate: record.gate,
-    review: record.review,
-    artifact: record.artifact,
-    manifest: record.manifest,
-  };
+export const reviewInput = reviewArgumentsSchema;
+export interface McpOptions {
+  root: string;
+  runnerImage?: string;
+  trustedLocal?: boolean;
+  run?: typeof runReview;
 }
 
-async function handleToolCall(args: unknown) {
-  const input = args as { checkout?: unknown; base?: unknown; intent?: unknown };
-  if (typeof input?.checkout !== "string" || typeof input.base !== "string" || !Array.isArray(input.intent)) throw new Error("checkout, base, intent required");
-  // sealed guard: reject traversing outside checkout - gate derives verdict anyway
-  for (const p of input.intent) if (typeof p === "string" && p.includes("..")) throw new Error("sealed guard: intent path escapes checkout");
-  const record = await runReview({ checkout: input.checkout, base: input.base, intent: input.intent.filter((p): p is string => typeof p === "string") });
-  const structuredContent = buildOutput(record);
-  return { structuredContent, content: [{ type: "text", text: JSON.stringify(structuredContent) }] };
-}
-
-function handleRequest(msg: unknown): RpcResult {
-  const { id, method, params } = msg as { id?: unknown; method?: string; params?: JsonObject };
-  if (!method) return { jsonrpc: "2.0", id, error: { code: -32600, message: "invalid request" } };
-  if (method === "initialize") return { jsonrpc: "2.0", id, result: { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "lesscode", version: "0.0.0" } } };
-  if (method === "notifications/initialized" || method.startsWith("notifications/")) return null;
-  if (method === "tools/list") return { jsonrpc: "2.0", id, result: { tools: [{ name: TOOL_NAME, description: "Review a change", inputSchema, outputSchema }] } };
-  if (method === "tools/call") {
-    if (params?.name !== TOOL_NAME) return { jsonrpc: "2.0", id, error: { code: -32602, message: `unknown tool ${params?.name}` } };
-    return handleToolCall(params.arguments).then(
-      (r) => ({ jsonrpc: "2.0", id, result: r }),
-      (e: unknown) => ({ jsonrpc: "2.0", id, error: { code: -32000, message: e instanceof Error ? e.message : String(e) } }),
-    );
-  }
-  return { jsonrpc: "2.0", id, error: { code: -32601, message: `unknown method ${method}` } };
-}
-
-// stdio transport
-export async function startStdio() {
-  let buf = "";
-  process.stdin.setEncoding("utf8");
-  for await (const chunk of process.stdin) {
-    buf += chunk;
-    let idx;
-    while ((idx = buf.indexOf("\n")) !== -1) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 1);
-      if (!line) continue;
-      const msg = JSON.parse(line);
-      const res = await handleRequest(msg);
-      if (res) {
-        const out = await res;
-        process.stdout.write(JSON.stringify(out) + "\n");
-      }
-    }
-  }
-}
-
-// Streamable HTTP via mcp-proxy pattern: single POST endpoint, Mcp-Protocol-Version header, no session-id
-const MAX_BODY = 1_000_000;
-
-function header(headers: Record<string, unknown> | undefined, name: string): string {
-  const wanted = name.toLowerCase();
-  const entry = Object.entries(headers ?? {}).find(([key]) => key.toLowerCase() === wanted)?.[1];
-  return Array.isArray(entry) ? String(entry[0] ?? "") : String(entry ?? "");
-}
-
-export function createHttpHandler() {
-  return async (req: HttpRequest, res: HttpResponse) => {
-    // optional bearer auth if LESSCODE_MCP_TOKEN set
-    const token = process.env.LESSCODE_MCP_TOKEN;
-    if (token) {
-      const auth = header(req.headers, "authorization");
-      if (auth !== `Bearer ${token}`) {
-        res.writeHead(401);
-        res.end("Unauthorized");
-        return;
-      }
-    }
-    // require protocol version header
-    if (!header(req.headers, "mcp-protocol-version")) {
-      res.writeHead(400);
-      res.end("Missing Mcp-Protocol-Version");
-      return;
-    }
-    let body = "";
-    let size = 0;
-    for await (const c of req) {
-      const chunk = typeof c === "string" ? c : Buffer.from(c);
-      body += typeof chunk === "string" ? chunk : chunk.toString();
-      size += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.byteLength;
-      if (size > MAX_BODY) {
-        res.writeHead(413);
-        res.end("Payload too large");
-        return;
-      }
-    }
-    let msg: unknown;
+/** Execution and filesystem authority belong to the host, never tool arguments. */
+export function createMcpServer(options: McpOptions) {
+  const root = realpathSync(options.root);
+  const server = new McpServer({ name: 'lesscode', version: '0.1.0' });
+  server.registerTool('review_change', {
+    description: 'Review a change and return the canonical RunRecord. The deterministic engine decides the verdict.',
+    inputSchema: reviewInput,
+    outputSchema: runRecordSchema,
+  }, async (input, extra) => {
+    const checkout = realpathSync(input.checkout);
+    const path = relative(root, checkout);
+    if (isAbsolute(path) || path === '..' || path.startsWith('../') || checkout.split(/[\\/]/).includes('sealed')) throw new Error('checkout is outside approved root');
+    if (!options.trustedLocal && !options.runnerImage) throw new Error('isolated execution requires an approved runner image');
+    const executor = options.trustedLocal ? undefined : createDockerExecutor({ image: options.runnerImage! });
+    const controller = new AbortController();
+    const cancel = () => controller.abort(extra.signal.reason);
+    extra.signal.addEventListener('abort', cancel, { once: true });
+    const deadline = setTimeout(() => controller.abort(new Error('review exceeded MCP deadline')), 900_000);
     try {
-      msg = JSON.parse(body || "{}");
-    } catch {
-      res.writeHead(400);
-      res.end("Invalid JSON");
-      return;
-    }
-    const result = await handleRequest(msg);
-    const resolved = await result;
-    if (!resolved) {
-      res.writeHead(202);
-      res.end();
-      return;
-    }
-    res.writeHead(200, { "Content-Type": "application/json", "Mcp-Protocol-Version": "2025-03-26" });
-    res.end(JSON.stringify(resolved));
-  };
+      if (extra.signal.aborted) cancel();
+      const record = await (options.run ?? runReview)({ ...input, checkout, executor, signal: controller.signal } satisfies ReviewRequest);
+      return { structuredContent: { ...record }, content: [{ type: 'text' as const, text: JSON.stringify(record) }] };
+    } finally { clearTimeout(deadline); extra.signal.removeEventListener('abort', cancel); await executor?.dispose(); }
+  });
+  return server;
 }
 
-export const __test__ = { handleRequest, handleToolCall, buildOutput };
+export async function startStdio(options: McpOptions) {
+  const server = createMcpServer(options);
+  await server.connect(new StdioServerTransport());
+  return server;
+}
 
-// CLI entry
-const mode = process.argv[2];
-if (mode === "--stdio") startStdio();
-else if (mode === "--http") {
-  const { createServer } = await import("node:http");
-  const port = Number(process.env.PORT ?? 3000);
-  createServer(createHttpHandler()).listen(port, () => console.log(`MCP HTTP on ${port}`));
+/** Stateless Streamable HTTP, with bounded requests and mandatory bearer authentication. */
+export function createHttpHandler(options: McpOptions & { token: string; origins?: string[]; maxBodyBytes?: number }) {
+  if (options.token.length < 32) throw new Error('MCP HTTP token must contain at least 32 characters');
+  if (options.trustedLocal) throw new Error('MCP HTTP requires isolated repository execution');
+  if (!options.runnerImage) throw new Error('MCP HTTP requires an approved runner image');
+  const expected = Buffer.from(`Bearer ${options.token}`);
+  let active = 0;
+  return async (request: IncomingMessage, response: ServerResponse) => {
+    const fail = (status: number, message: string) => { response.writeHead(status, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: message })); };
+    const actual = Buffer.from(request.headers.authorization ?? '');
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) { fail(401, 'authentication required'); return; }
+    if (request.headers.origin && !(options.origins ?? []).includes(request.headers.origin)) { fail(403, 'origin denied'); return; }
+    if (request.url !== '/mcp') { fail(404, 'route not found'); return; }
+    if (request.method !== 'POST') { response.setHeader('Allow', 'POST'); fail(405, 'method not allowed'); return; }
+    if (active >= 2) { fail(503, 'MCP capacity reached'); return; }
+    active++;
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let server: McpServer | undefined;
+    try {
+      server = createMcpServer(options);
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+      for await (const chunk of request) {
+        const bytes = Buffer.from(chunk);
+        size += bytes.length;
+        if (size > (options.maxBodyBytes ?? 1_000_000)) { fail(413, 'payload too large'); return; }
+        chunks.push(bytes);
+      }
+      let body: unknown;
+      try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+      catch { fail(400, 'invalid JSON'); return; }
+      await server.connect(transport);
+      await transport.handleRequest(request, response, body);
+    } catch { if (!response.headersSent) fail(500, 'MCP request failed'); }
+    finally { try { await server?.close(); } finally { active--; } }
+  };
 }

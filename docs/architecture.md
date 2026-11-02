@@ -1,5 +1,9 @@
 # Architecture
 
+Current hardening work is tracked in [the implementation plan](architecture-hardening-plan.md). CLI, skills and MCP share the versioned RunRecord and strict review arguments. MCP framing/lifecycle belongs to the official SDK; repository execution and approved filesystem roots belong to the host. The engine resolves both model roles before model execution and does not grant trust to preloaded repository configuration.
+
+For a separate API and execution host, see [hosted deployment](hosted-deployment.md). The API can delegate to a private authenticated worker without GitHub/model keys or Docker authority. Single-process durable stores remain explicit; multi-tenant transactional scheduling is a separate migration requirement.
+
 `runReview` owns one review. It resolves the commit, prepares the edit, checks the result, and returns one `RunRecord`. Local commands, a fetched pull request, and the hosted service all call it. GitHub publication sits outside the engine and is pinned to the commit that was reviewed.
 
 ```mermaid

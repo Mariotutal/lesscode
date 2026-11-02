@@ -3,6 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "engines": { "node": ">=22" },
+  "files": ["dist", "bin", "scripts/lesscode.mjs", "skills/lesscode"],
   "scripts": {
     "gate": "tsx src/gate/cli.ts",
     "classify": "tsx src/classify/cli.ts",
@@ -12,6 +14,9 @@
     "simplify-tool": "tsx src/tool/cli.ts",
     "pr-review": "tsx src/pr/cli.ts",
     "test": "vitest run tests",
+    "pretest": "npm run build",
+    "prepack": "npm run build",
+    "mcp": "node dist/mcp/cli.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
     "github-pr-review": "tsx src/pr/githubCli.ts",
@@ -33,6 +38,7 @@
     "vitest": "^3.2.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "typescript": "^5.8.0",
     "zod": "^4.6.7"
   },
@@ -44,7 +50,10 @@
   "exports": {
     ".": "./dist/engine/index.js",
     "./execution": "./dist/execution/index.js",
-    "./source": "./dist/source/index.js"
+    "./source": "./dist/source/index.js",
+    "./provider": "./dist/provider/index.js",
+    "./contracts": "./dist/contracts/review.js",
+    "./review": "./dist/review/index.js"
   },
   "bin": {
     "lesscode": "bin/lesscode"

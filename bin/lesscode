@@ -1,2 +1,2 @@
-#!/usr/bin/env sh
-exec node "$(dirname "$0")/../scripts/lesscode.mjs" "$@"
+#!/usr/bin/env node
+await import(new URL('../dist/cli/main.js', import.meta.url).href);
