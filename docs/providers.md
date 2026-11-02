@@ -1,6 +1,6 @@
 # Providers and gateways
 
-LessCode talks to one OpenAI-compatible endpoint per model role. Set one shared key and base URL, or pin each role separately. A committed `.lesscode.json` can pin providers per repository (see [Run](run.md)).
+LessCode talks to one OpenAI-compatible endpoint per model role. Set one shared key and base URL, or pin each role separately. An operator-owned `.lesscode.json` can pin providers for a trusted local checkout (see [Run](run.md)). Fetched reviews cannot.
 
 ## Trusted model policy
 
@@ -8,7 +8,7 @@ Endpoints and credential bindings are resolved only from operator-owned configur
 
 ```bash
 # Inline JSON policy (control process only)
-LESSCODE_TRUSTED_POLICY='{"version":"1","providers":{"openai":{"baseUrl":"https://api.openai.com/v1","apiKeyEnv":"OPENAI_API_KEY","allowedModels":["gpt-4o"]}}}'
+LESSCODE_TRUSTED_POLICY='{"version":1,"providers":{"openai":{"baseUrl":"https://api.openai.com/v1","apiKeyEnv":"OPENAI_API_KEY","allowedModels":["gpt-4o"]}}}'
 
 # Or a file outside the checkout
 LESSCODE_TRUSTED_POLICY_FILE=/etc/lesscode/trusted-policy.json

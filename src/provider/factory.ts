@@ -64,11 +64,11 @@ export interface ResolveProviderOptions {
 
 /**
  * Resolution: explicit arg > LESSCODE_* env (incl. deprecated META_*)
- * > `.lesscode.json` file > hardcoded defaults.
- * File layer: models[role] selects a named provider (baseUrl +
- * apiKeyEnv -> env lookup) and model. Env always overrides the file,
- * so a committed file can pin providers without env mutation, while
- * operators can still override per-run. Secrets only via env indirection.
+ * > operator trusted policy > `.lesscode.json` file > hardcoded defaults.
+ * File `providers` (baseUrl + apiKeyEnv) apply only when `trusted` is true
+ * (operator-owned cwd). Untrusted checkouts may request an alias+model
+ * when a trusted policy is present; they cannot choose endpoint or credential env.
+ * Env always overrides the file. Secrets only via env indirection.
  */
 export function resolveProviderConfig(
   role: ModelRole = "spark",
@@ -86,9 +86,10 @@ export function resolveProviderConfig(
     };
   }
   const trustedPolicy = opts?.trustedPolicy !== undefined ? opts.trustedPolicy : loadTrustedPolicy(env);
+  const trusted = opts?.trusted === true;
   const file: LesscodeConfig | null = opts && "fileConfig" in opts ? (opts.fileConfig ?? null)
-    : opts?.cwd && opts?.trusted ? loadLesscodeConfig(opts.cwd).config : null;
-  // Trusted path: repo may only request alias+model, never endpoint/credential
+    : opts?.cwd && (trusted || trustedPolicy) ? loadLesscodeConfig(opts.cwd).config : null;
+  // Policy path: checkout may only request alias+model, never endpoint/credential.
   if (trustedPolicy) {
     const fileRef = file?.models?.[role];
     if (fileRef) {
@@ -102,12 +103,13 @@ export function resolveProviderConfig(
         apiKey,
         model: fileRef.model,
         provider: fileRef.provider,
-        ...(file?.pricing ? { pricing: file.pricing } : {}),
+        ...(trusted && file?.pricing ? { pricing: file.pricing } : {}),
       };
     }
-    return resolveFromTrustedPolicy(role, trustedPolicy, env);
+    if (trustedPolicy.models?.[role]) return resolveFromTrustedPolicy(role, trustedPolicy, env);
   }
-  const ref = file?.models?.[role];
+  const useFileProviders = trusted || Boolean(opts && "fileConfig" in opts);
+  const ref = useFileProviders ? file?.models?.[role] : undefined;
   const named = ref ? file?.providers?.[ref.provider] : undefined;
   if (ref && !named) throw new Error(`.lesscode.json: models.${role}.provider "${ref.provider}" is not defined in providers`);
   const fileKey = named ? env[named.apiKeyEnv]?.trim() : undefined;
@@ -143,11 +145,11 @@ export function resolveProviderConfig(
   };
 }
 
-/** True when a model API key is configured (used by the run guard). */
-export function modelEnvAvailable(env: NodeJS.ProcessEnv = process.env, cwd?: string): boolean {
+/** True when a model API key is configured (used by the run guard). Untrusted cwd is never scanned. */
+export function modelEnvAvailable(env: NodeJS.ProcessEnv = process.env, cwd?: string, trusted = false): boolean {
   if (env.LESSCODE_SPARK_API_KEY?.trim() || env.LESSCODE_WONDER_API_KEY?.trim() || env.LESSCODE_API_KEY?.trim() ||
     env.META_API_KEY?.trim() || env.MODEL_API_KEY?.trim() || env.META_AI_API_KEY?.trim()) return true;
-  if (!cwd) return false;
+  if (!cwd || !trusted) return false;
   try {
     const { config } = loadLesscodeConfig(cwd);
     return Object.values(config?.providers ?? {}).some((p) => env[p.apiKeyEnv]?.trim());
@@ -174,7 +176,7 @@ export interface CreateModelClientOptions {
 }
 
 export function createModelClient(role: ModelRole = "spark", opts?: CreateModelClientOptions): ModelClient {
-  const config = opts?.config ?? resolveProviderConfig(role, opts?.env, { warn: opts?.warn, trustedPolicy: opts?.trustedPolicy, ...(opts?.cwd ? { cwd: opts.cwd, trusted: opts.trusted } : {}) });
+  const config = opts?.config ?? resolveProviderConfig(role, opts?.env, { warn: opts?.warn, trustedPolicy: opts?.trustedPolicy, ...(opts?.cwd ? { cwd: opts.cwd, trusted: opts.trusted === true } : {}) });
   const fetchFn: FetchLike =
     opts?.fetchFn ??
     (async (url, init) => {
