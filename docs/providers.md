@@ -1,6 +1,20 @@
 # Providers and gateways
 
-LessCode talks to one OpenAI-compatible endpoint per model role. Set one shared key and base URL, or pin each role separately. A committed `.lesscode.json` can pin providers per repository (see [Run](run.md)).
+LessCode talks to one OpenAI-compatible endpoint per model role. Set one shared key and base URL, or pin each role separately. An operator-owned `.lesscode.json` can pin providers for a trusted local checkout (see [Run](run.md)). Fetched reviews cannot.
+
+## Trusted model policy
+
+Endpoints and credential bindings are resolved only from operator-owned configuration — environment variables on the control process or a file outside the reviewed repository. The checked-out `.lesscode.json` is untrusted: it may request an approved provider alias or model, but it cannot choose arbitrary `baseUrl` or `apiKeyEnv` values and cannot cause credentials to be sent to an unapproved host.
+
+```bash
+# Inline JSON policy (control process only)
+LESSCODE_TRUSTED_POLICY='{"version":1,"providers":{"openai":{"baseUrl":"https://api.openai.com/v1","apiKeyEnv":"OPENAI_API_KEY","allowedModels":["gpt-4o"]}}}'
+
+# Or a file outside the checkout
+LESSCODE_TRUSTED_POLICY_FILE=/etc/lesscode/trusted-policy.json
+```
+
+When a trusted policy is present, provider aliases and origins are validated before any model request; unknown aliases, models, or origins fail the run before Spark is called. Without a trusted policy the process falls back to `LESSCODE_API_*` environment variables and, for local trusted use, an operator-owned `.lesscode.json` outside the fetched checkout — never to configuration inside the PR under review. See [Architecture](architecture.md) for the full trust boundary.
 
 ## The contract
 

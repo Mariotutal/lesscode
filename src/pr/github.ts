@@ -249,7 +249,9 @@ export async function runGithubPrReview(opts: GithubPrReviewOptions): Promise<Gi
     const ownedByPublisher = (item: Obj): boolean => Boolean(publisher && ((publisher.appId && (asObj(item.app).id === publisher.appId || asObj(item.performed_via_github_app).id === publisher.appId)) || (publisher.actorId && (asObj(item.user).id === publisher.actorId || asObj(item.creator).id === publisher.actorId))));
     const checkRuns = await allPages(opts.api, `/repos/${slug}/commits/${identity.headSha}/check-runs`, "check_runs");
     const priorCheck = checkRuns.find((item) => item.name === CHECK_NAME && ownedByPublisher(item));
-    const payload = { name: CHECK_NAME, head_sha: identity.headSha, status: "completed", conclusion: check.conclusion, output: { title: `LessCode review: ${check.conclusion}`, summary: check.body } };
+    // Branch protection signal: neutral for reviewed (no gate), failure for failed; success only on accepted gate.
+    const conclusion = check.conclusion === "success" ? "success" : check.conclusion === "neutral" ? "neutral" : "failure";
+    const payload = { name: CHECK_NAME, head_sha: identity.headSha, status: "completed", conclusion, output: { title: `LessCode review: ${conclusion}`, summary: check.body } };
     await assertCurrent();
     const postedCheck = await opts.api.request(priorCheck
       ? { method: "PATCH", path: `/repos/${slug}/check-runs/${String(priorCheck.id)}`, body: payload }
@@ -276,6 +278,11 @@ export async function runGithubPrReview(opts: GithubPrReviewOptions): Promise<Gi
       }
       outcome.patchOffer.suggestions = suggestions.comments.length;
     } else outcome.patchOffer.branch = await offerBranch(change.checkout, identity, result.applied, opts.suggestionBranch, assertCurrent, opts.api, result.run?.artifact?.treeHash);
+    // Publish batch annotations capped at 50 per batch
+    if (result.review?.findings?.length) {
+      const annotations = result.review.findings.slice(0, 200).map((f: { path?: string; line?: number; message?: string }) => ({ path: f.path ?? "", start_line: f.line ?? 1, end_line: f.line ?? 1, annotation_level: "notice" as const, message: String(f.message ?? "").slice(0, 1000) })).filter(a=>a.path);
+      for (let i=0;i<annotations.length;i+=50) { await assertCurrent(); const batch = annotations.slice(i,i+50); await opts.api.request({ method: "PATCH", path: `/repos/${slug}/check-runs/${String((postedCheck.body as Obj).id)}`, body: { output: { title: `LessCode review: ${conclusion}`, summary: check.body, annotations: batch } } }).catch(()=>{}); }
+    }
     return outcome;
-  } finally { await loaded.dispose(); }
+  } finally { try { if (opts.signal) (opts as unknown as { cancel?: ()=>void }).cancel?.(); } catch {} await loaded.dispose(); }
 }

@@ -19,7 +19,7 @@ The model endpoint defaults to `https://api.meta.ai/v1` but any OpenAI-compatibl
 
 ## Per-repo config: `.lesscode.json`
 
-A repository can commit a `.lesscode.json` at its root (loader: `src/provider/configFile.ts`, zod-validated, cached, searched upward from the checkout; schema: `schemas/lesscode.schema.json`, referenced by `$schema`). It pins each role to a named provider without env mutation, e.g. Spark at Meta and Wonder via OpenRouter:
+A trusted local checkout can use `.lesscode.json` at its root (loader: `src/provider/configFile.ts`, zod-validated, cached, searched upward from the checkout; schema: `schemas/lesscode.schema.json`, referenced by `$schema`). It pins each role to a named provider without env mutation, e.g. Spark at Meta and Wonder via OpenRouter. Fetched pull-request checkouts cannot choose `baseUrl` or `apiKeyEnv`; they may only request an operator-approved alias when `LESSCODE_TRUSTED_POLICY` / `LESSCODE_TRUSTED_POLICY_FILE` is set (see [Providers](providers.md)).
 
 ```json
 {
@@ -37,7 +37,7 @@ A repository can commit a `.lesscode.json` at its root (loader: `src/provider/co
 }
 ```
 
-The file is commit-safe: providers name the env var holding the key (`apiKeyEnv`) only — a literal `apiKey` in the file is rejected, and errors redact secrets. Resolution order is explicit argument > `LESSCODE_*` env > `.lesscode.json` > hardcoded defaults (`muse-spark-1.3` / `muse-wonder-1.0`, `https://api.meta.ai/v1`). `pricing` is optional per-model USD per 1M tokens.
+The file is commit-safe: providers name the env var holding the key (`apiKeyEnv`) only — a literal `apiKey` in the file is rejected, and errors redact secrets. Resolution order is explicit argument > `LESSCODE_*` env > operator-owned trusted policy > a `.lesscode.json` in a trusted operator cwd, or alias+model requests from an untrusted checkout when a trusted policy is present > hardcoded defaults (`muse-spark-1.3` / `muse-wonder-1.0`, `https://api.meta.ai/v1`). `pricing` is optional per-model USD per 1M tokens.
 
 ## Review a GitHub pull request
 
