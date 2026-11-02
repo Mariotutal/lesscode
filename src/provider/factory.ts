@@ -1,6 +1,7 @@
 import type { FetchLike, ModelClient, ModelRole, ProviderConfig } from "./types.js";
-import { loadLesscodeConfig, type LesscodeConfig } from "./configFile.js";
+import { loadLesscodeConfig, redactSecrets, type LesscodeConfig } from "./configFile.js";
 import { loadTrustedPolicy, resolveFromTrustedPolicy, type TrustedPolicy } from "./policy.js";
+import { openAiChatProtocol, type ModelProtocol } from './protocol.js';
 
 export const DEFAULT_API_BASE_URL = "https://api.meta.ai/v1";
 export const META_API_BASE = DEFAULT_API_BASE_URL;
@@ -108,7 +109,7 @@ export function resolveProviderConfig(
     }
     if (trustedPolicy.models?.[role]) return resolveFromTrustedPolicy(role, trustedPolicy, env);
   }
-  const useFileProviders = trusted || Boolean(opts && "fileConfig" in opts);
+  const useFileProviders = trusted;
   const ref = useFileProviders ? file?.models?.[role] : undefined;
   const named = ref ? file?.providers?.[ref.provider] : undefined;
   if (ref && !named) throw new Error(`.lesscode.json: models.${role}.provider "${ref.provider}" is not defined in providers`);
@@ -162,6 +163,7 @@ export function isTransientStatus(status: number): boolean {
 }
 
 export interface CreateModelClientOptions {
+  protocol?: ModelProtocol;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
   trusted?: boolean;
@@ -188,16 +190,12 @@ export function createModelClient(role: ModelRole = "spark", opts?: CreateModelC
   const maxRetries = opts?.maxRetries ?? 2;
   const retryBackoffMs = opts?.retryBackoffMs ?? 500;
   const sleep = opts?.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const protocol = opts?.protocol ?? openAiChatProtocol;
   return {
     config,
     async chat(req) {
-      const body = {
-        model: config.model,
-        messages: req.messages,
-        ...(req.tools ? { tools: req.tools } : {}),
-        // tool_choice stays "auto" — never forced (LES-3).
-        ...(req.tools ? { tool_choice: req.toolChoice ?? "auto" } : {}),
-      };
+      if (req.tools?.length && !protocol.supportsTools) throw new Error(`model protocol ${protocol.id} does not support tools`);
+      const encoded = protocol.encode(config, req);
       // Timeout (per attempt) + transport retry on transient 429/5xx
       // (at most maxRetries, exponential backoff). No extra model calls.
       let res: Awaited<ReturnType<FetchLike>> | undefined;
@@ -209,13 +207,11 @@ export function createModelClient(role: ModelRole = "spark", opts?: CreateModelC
         req.signal?.addEventListener("abort", cancel, { once: true });
         const timer = setTimeout(() => controller.abort(), timeoutMs);
         try {
-          res = await fetchFn(`${config.baseUrl}/chat/completions`, {
+          res = await fetchFn(encoded.url, {
+            redirect: "error",
             method: "POST",
-            headers: {
-              Authorization: `Bearer ${config.apiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(body),
+            headers: encoded.headers,
+            body: JSON.stringify(encoded.body),
             signal: controller.signal,
           });
           raw = await res.text();
@@ -234,31 +230,19 @@ export function createModelClient(role: ModelRole = "spark", opts?: CreateModelC
       // Keep historic "Meta API" wording only when talking to the default Meta endpoint.
       const label = config.baseUrl === DEFAULT_API_BASE_URL ? "Meta API" : "model API";
       if (!res) throw new Error(`${label}: no response`);
-      if (!res.ok) throw new Error(`${label} ${res.status}: ${raw.slice(0, 500)}`);
+      const safeResponse = (text: string) => redactSecrets(text.split(config.apiKey).join('[redacted]'), opts?.env).slice(0, 500);
+      if (!res.ok) throw new Error(`${label} ${res.status}: ${safeResponse(raw)}`);
       let parsed: unknown;
       try {
         parsed = JSON.parse(raw);
       } catch {
-        throw new Error(`${label} returned non-JSON: ${raw.slice(0, 200)}`);
+        throw new Error(`${label} returned non-JSON: ${safeResponse(raw)}`);
       }
-      const root = parsed as {
-        choices?: { message?: import("./types.js").ChatMessage; finish_reason?: string }[];
-        usage?: ChatCompletionResultUsage;
-        model?: string;
-      };
-      const choice = root.choices?.[0];
-      return {
-        content: choice?.message?.content ?? null,
-        toolCalls: choice?.message?.tool_calls ?? [],
-        finishReason: choice?.finish_reason ?? null,
-        usage: root.usage,
-        model: root.model,
-      };
+      return protocol.decode(parsed);
     },
   };
 }
 
-type ChatCompletionResultUsage = { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
 
 /** Back-compat: default role is spark. */
 export function createGuestClient(opts?: CreateModelClientOptions & { role?: ModelRole }): ModelClient {

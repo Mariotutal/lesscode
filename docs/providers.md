@@ -1,5 +1,11 @@
 # Providers and gateways
 
+## Resolution and protocol adapters
+
+Both clients resolve before the first model call using an environment snapshot and one repository configuration read bounded to the reviewed root. A preloaded config carries no trust: only an operator-selected trusted local checkout can define credential references or endpoints. Fetched source may request aliases only from an operator registry. Redirects are rejected by the transport.
+
+`ModelProtocol` separates wire encoding/decoding and tool capability from timeout, retry and cancellation. OpenAI Chat Completions is the built-in protocol. A trusted host can inject another adapter through `createModelClient({protocol})` (the role is the first argument); normalize content, tool calls and usage into `ChatCompletionResult`. Native Anthropic/Gemini compatibility is not implied by a base URL change; supply and fixture-test the appropriate adapter. Protocol selection is not a repository-config field. Exported provider interfaces are available at `lesscode/provider`.
+
 LessCode talks to one OpenAI-compatible endpoint per model role. Set one shared key and base URL, or pin each role separately. An operator-owned `.lesscode.json` can pin providers for a trusted local checkout (see [Run](run.md)). Fetched reviews cannot.
 
 ## Trusted model policy

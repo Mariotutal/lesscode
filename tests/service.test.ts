@@ -21,6 +21,17 @@ async function waitFor(predicate: () => boolean) {
 }
 
 describe("durable review job store", () => {
+  it('persists idempotency binding atomically with the initial job and across restarts', () => {
+    const path = directory();
+    const first = new ReviewJobStore(path);
+    const { job } = first.create(input, 'durable-request-key');
+    first.close();
+    const second = new ReviewJobStore(path);
+    try {
+      expect(second.findByIdempotencyKey('durable-request-key')?.id).toBe(job.id);
+      expect(second.findByIdempotencyKey('durable-request-key')?.request).toEqual(input);
+    } finally { second.close(); }
+  });
   it("deduplicates by immutable identity and prevents a second service owning the same store", () => {
     const path = directory();
     const store = new ReviewJobStore(path);
@@ -78,15 +89,24 @@ async function start(runner: HostedReviewRunner, extra: Partial<ReviewServiceCon
   const service = createReviewService(config(extra), { runner });
   const address = await service.listen();
   const base = `http://127.0.0.1:${address.port}`;
-  const request = (path: string, body?: unknown, authenticated = true) => fetch(`${base}${path}`, {
+  const request = (path: string, body?: unknown, authenticated = true, headers: Record<string, string> = {}) => fetch(`${base}${path}`, {
     method: body === undefined ? "GET" : "POST",
-    headers: { ...(authenticated ? { authorization: `Bearer ${token}` } : {}), "content-type": "application/json" },
+    headers: { ...(authenticated ? { authorization: `Bearer ${token}` } : {}), "content-type": "application/json", ...headers },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   return { service, request };
 }
 
 describe("authenticated hosted review application", () => {
+  it('reuses durable idempotency keys only for the same immutable request', async () => {
+    const { service, request } = await start(async () => ({ verdict: 'reviewed' }));
+    try {
+      const headers = { 'idempotency-key': 'same-request-key' };
+      expect((await request('/reviews', input, true, headers)).status).toBe(202);
+      expect((await request('/reviews', input, true, headers)).status).toBe(200);
+      expect((await request('/reviews', { ...input, expectedHeadSha: 'b'.repeat(40) }, true, headers)).status).toBe(409);
+    } finally { await service.close(); }
+  });
   it("rejects missing startup policy", () => {
     const runner = async () => ({});
     expect(() => createReviewService(config({ token: "short" }), { runner })).toThrow(/token/);

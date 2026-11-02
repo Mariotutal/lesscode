@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runReview } from "../src/engine/run.js";
 import { transactEdit } from "../src/engine/transaction.js";
 import { measureSource } from "../src/gate/metrics.js";
@@ -36,6 +36,32 @@ function model(findings: unknown[] = [finding], edits: unknown[] = [inline], not
     return { content: null, finishReason: "tool_calls", toolCalls: [{ id: "1", type: "function", function: { name, arguments: JSON.stringify(name === "report_findings" ? { findings } : { edits, review: note }) } }] };
   } };
 }
+
+it('pins Wonder configuration before Spark, and sees changed environment on the next run', async () => {
+  const dir = repository(files);
+  const before = { ...process.env };
+  const seen: string[] = [];
+  process.env.LESSCODE_API_KEY = 'fake-snapshot-key';
+  process.env.LESSCODE_WONDER_MODEL = 'first-model';
+  delete process.env.LESSCODE_TRUSTED_POLICY;
+  delete process.env.LESSCODE_TRUSTED_POLICY_FILE;
+  vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+    const request = JSON.parse(String(init.body));
+    seen.push(request.model);
+    return new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ id: '1', type: 'function', function: { name: request.tools[0].function.name, arguments: JSON.stringify({ edits: [], review: [] }) } }] } }] }));
+  });
+  const spark = model([], []);
+  const changingSpark: GuestClient = { ...spark, async chat(req) { process.env.LESSCODE_WONDER_MODEL = 'next-model'; return spark.chat(req); } };
+  try {
+    const first = await runReview({ checkout: dir, base: 'HEAD', intent: ['src/wrap.js'], sparkClient: changingSpark });
+    expect(first.state).toBe('completed');
+    const second = await runReview({ checkout: dir, base: 'HEAD', intent: ['src/wrap.js'], sparkClient: spark });
+    expect(second.state).toBe('completed');
+    expect(seen).toEqual(['first-model', 'next-model']);
+    expect(first.execution.configHash).not.toBe(second.execution.configHash);
+    expect(JSON.stringify(first.execution)).not.toContain('fake-snapshot-key');
+  } finally { process.env = before; vi.unstubAllGlobals(); }
+});
 
  describe("atomic edit transactions", () => {
   it("restores every importer and deletion after rejection or a verification exception", async () => {
@@ -110,7 +136,7 @@ describe("one review engine", () => {
     const dir = repository(files);
     let calls = 0;
     const client: GuestClient = { config: { model: "failed-model", apiKey: "secret", baseUrl: "stub" }, async chat() { calls++; throw new Error("transport failed"); } };
-    const failed = await runReview({ checkout: dir, base: "HEAD", intent: ["src/wrap.js"], sparkClient: client });
+    const failed = await runReview({ checkout: dir, base: "HEAD", intent: ["src/wrap.js"], sparkClient: client, wonderClient: model() });
     expect(failed.state).toBe("failed"); expect(failed.failure?.stage).toBe("classify");
     expect(failed.manifest.callsByModel.spark).toBe(1); expect(failed.manifest.promptHashes).toHaveLength(1);
     expect(JSON.stringify(failed.manifest)).not.toContain("secret");

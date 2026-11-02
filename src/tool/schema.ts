@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { reviewArgumentsSchema } from '../contracts/review.js';
 
 /**
  * Arguments of the `simplify` tool: exactly the inputs of
@@ -7,11 +8,6 @@ import { z } from "zod";
  * from it. `relatedTests` is optional and defaults to ["tests"]
  * inside simplify.
  */
-export const simplifyToolArgumentsSchema = z.object({
-  checkout: z.string().min(1),
-  base: z.string().min(1),
-  intent: z.array(z.string().min(1)).min(1),
-  relatedTests: z.array(z.string().min(1)).min(1).optional(),
-});
+export const simplifyToolArgumentsSchema = reviewArgumentsSchema;
 
 export type SimplifyToolArguments = z.infer<typeof simplifyToolArgumentsSchema>;

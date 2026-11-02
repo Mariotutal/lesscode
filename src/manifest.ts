@@ -113,11 +113,12 @@ export class ManifestBuilder {
   /** Record one response: aggregate + per-role usage, and the provider-returned model id. */
   recordResponse(role: "spark" | "wonder", usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }, responseModel?: string): void {
     const hasUsage = usage != null && (usage.prompt_tokens !== undefined || usage.completion_tokens !== undefined || usage.total_tokens !== undefined);
-    if (hasUsage) { addUsage(this.usage, usage); addUsage(this.usageByRole[role], usage); }
+    const validUsage = hasUsage && [usage?.prompt_tokens, usage?.completion_tokens, usage?.total_tokens].every(n => n === undefined || validFinite(n));
+    if (validUsage) { addUsage(this.usage, usage); addUsage(this.usageByRole[role], usage); }
     if (responseModel) this.responseModels[role] = responseModel;
     const effective = responseModel ?? (role === "spark" ? this.sparkModel : this.wonderModel);
     const norm: TokenUsage = { prompt_tokens: validFinite(usage?.prompt_tokens) ? usage!.prompt_tokens! : 0, completion_tokens: validFinite(usage?.completion_tokens) ? usage!.completion_tokens! : 0, total_tokens: validFinite(usage?.total_tokens) ? usage!.total_tokens! : ((usage?.prompt_tokens ?? 0)+(usage?.completion_tokens ?? 0)) };
-    this.calls.push({ role, model: effective || "unknown", usage: norm, hasUsage: !!hasUsage && (validFinite(usage?.prompt_tokens) || validFinite(usage?.completion_tokens) || validFinite(usage?.total_tokens)) });
+    this.calls.push({ role, model: effective || "unknown", usage: norm, hasUsage: !!validUsage && validFinite(usage?.prompt_tokens) && validFinite(usage?.completion_tokens) });
   }
 
   setPricing(role: "spark" | "wonder", pricing?: Record<string, ModelPricing>): void {
@@ -141,8 +142,9 @@ export class ManifestBuilder {
     this.phasesMs.overhead = Math.max(0, totalMs - measured);
     const byRole: RunCost["byRole"] = {};
     const pricing: NonNullable<RunManifest["pricing"]> = {};
-    const priced: CostEntry[] = [];
+    const priced: (CostEntry & { role: 'spark' | 'wonder' })[] = [];
     const unpriced: UnpricedEntry[] = [];
+    for (const call of this.calls) if (!call.hasUsage) unpriced.push({ role: call.role, model: call.model, promptTokens: call.usage.prompt_tokens, completionTokens: call.usage.completion_tokens, totalTokens: call.usage.total_tokens, reason: 'usage missing, invalid, or incomplete' });
     // aggregate by role+model from per-call evidence
     const grouped = new Map<string, { role:"spark"|"wonder"; model:string; usage:TokenUsage }>();
     for (const c of this.calls) if (c.hasUsage) { const k=`${c.role}|${c.model}`; const g=grouped.get(k) ?? { role:c.role, model:c.model, usage:emptyUsage()}; addUsage(g.usage,c.usage); grouped.set(k,g); }
@@ -156,15 +158,15 @@ export class ManifestBuilder {
       const rolePricing = this.pricingByRole[g.role];
       const rate = rolePricing?.[g.model] ?? DEFAULT_PRICING[g.model];
       if (!rate || (rate.inputPerMtok===undefined && rate.outputPerMtok===undefined)) { unpriced.push({ role:g.role, model:g.model, promptTokens:g.usage.prompt_tokens, completionTokens:g.usage.completion_tokens, totalTokens:g.usage.total_tokens, reason:"unknown model rate"}); continue; }
-      if (g.usage.prompt_tokens>0 && rate.inputPerMtok===undefined) { unpriced.push({ role:g.role, model:g.model, promptTokens:g.usage.prompt_tokens, completionTokens:0, totalTokens:g.usage.prompt_tokens, reason:"missing input rate"}); }
-      if (g.usage.completion_tokens>0 && rate.outputPerMtok===undefined) { unpriced.push({ role:g.role, model:g.model, promptTokens:0, completionTokens:g.usage.completion_tokens, totalTokens:g.usage.completion_tokens, reason:"missing output rate"}); }
+      if (g.usage.prompt_tokens>0 && !validFinite(rate.inputPerMtok)) { unpriced.push({ role:g.role, model:g.model, promptTokens:g.usage.prompt_tokens, completionTokens:0, totalTokens:g.usage.prompt_tokens, reason:"missing or invalid input rate"}); }
+      if (g.usage.completion_tokens>0 && !validFinite(rate.outputPerMtok)) { unpriced.push({ role:g.role, model:g.model, promptTokens:0, completionTokens:g.usage.completion_tokens, totalTokens:g.usage.completion_tokens, reason:"missing or invalid output rate"}); }
       const src = pricingSource(g.model, rolePricing)!;
-      const inputUsd = g.usage.prompt_tokens>0 && rate.inputPerMtok!==undefined ? (g.usage.prompt_tokens/1e6)*rate.inputPerMtok : 0;
-      const outputUsd = g.usage.completion_tokens>0 && rate.outputPerMtok!==undefined ? (g.usage.completion_tokens/1e6)*rate.outputPerMtok : 0;
-      if (inputUsd||outputUsd) priced.push({ model:g.model, pricingSource:src, inputPerMtok:rate.inputPerMtok, outputPerMtok:rate.outputPerMtok, inputUsd, outputUsd, totalUsd: inputUsd+outputUsd, promptTokens:g.usage.prompt_tokens, completionTokens:g.usage.completion_tokens});
+      const inputUsd = g.usage.prompt_tokens>0 && validFinite(rate.inputPerMtok) ? (g.usage.prompt_tokens/1e6)*rate.inputPerMtok : 0;
+      const outputUsd = g.usage.completion_tokens>0 && validFinite(rate.outputPerMtok) ? (g.usage.completion_tokens/1e6)*rate.outputPerMtok : 0;
+      if (inputUsd||outputUsd) priced.push({ role: g.role, model:g.model, pricingSource:src, inputPerMtok:rate.inputPerMtok, outputPerMtok:rate.outputPerMtok, inputUsd, outputUsd, totalUsd: inputUsd+outputUsd, promptTokens:g.usage.prompt_tokens, completionTokens:g.usage.completion_tokens});
       else if (g.usage.prompt_tokens===0 && g.usage.completion_tokens===0) { /* zero usage: no entry */ }
     }
-    for (const e of priced) { const role = [...grouped.values()].find(v=>v.model===e.model)?.role; if(!role) continue; const cur=byRole[role]??{inputUsd:0,outputUsd:0,totalUsd:0}; cur.inputUsd+=e.inputUsd; cur.outputUsd+=e.outputUsd; cur.totalUsd+=e.totalUsd; byRole[role]=cur; }
+    for (const e of priced) { const role = e.role; const cur=byRole[role]??{inputUsd:0,outputUsd:0,totalUsd:0}; cur.inputUsd+=e.inputUsd; cur.outputUsd+=e.outputUsd; cur.totalUsd+=e.totalUsd; byRole[role]=cur; }
     const hasBillableUsage = grouped.size>0 && [...grouped.values()].some(g=>g.usage.prompt_tokens>0||g.usage.completion_tokens>0);
     const completeness: RunCost["completeness"] = !hasBillableUsage ? "unknown" : unpriced.length ? "partial" : "complete";
     const cost: RunCost | undefined = priced.length || unpriced.length

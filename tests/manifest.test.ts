@@ -80,6 +80,19 @@ function scripted(sparkFindings: unknown, wonderEdits: unknown): GuestClient {
 }
 
 describe("cost passthrough (LES-54)", () => {
+  it('attributes the same served model to separate roles and labels missing usage incomplete', () => {
+    const builder = new ManifestBuilder();
+    builder.sparkModel = builder.wonderModel = 'same';
+    builder.setPricing('spark', { same: { inputPerMtok: 1, outputPerMtok: 1 } });
+    builder.setPricing('wonder', { same: { inputPerMtok: 2, outputPerMtok: 2 } });
+    builder.recordResponse('spark', { prompt_tokens: 1_000_000, completion_tokens: 0 });
+    builder.recordResponse('wonder', { prompt_tokens: 1_000_000, completion_tokens: 0 });
+    expect(builder.build().cost?.byRole).toEqual({ spark: { inputUsd: 1, outputUsd: 0, totalUsd: 1 }, wonder: { inputUsd: 2, outputUsd: 0, totalUsd: 2 } });
+    builder.recordResponse('wonder');
+    expect(builder.build().cost?.completeness).toBe('partial');
+    builder.recordResponse('spark', { prompt_tokens: -5, completion_tokens: 0 });
+    expect(builder.build().usage.prompt_tokens).toBe(2_000_000);
+  });
   it("derives cost from usage with the default table and with pricing overrides", () => {
     expect(priceUsage("muse-spark-1.3", { prompt_tokens: 1_000_000, completion_tokens: 1_000_000, total_tokens: 2_000_000 })).toEqual({ inputUsd: 0.5, outputUsd: 1.5, totalUsd: 2 });
     expect(priceUsage("acme/model", { prompt_tokens: 500_000, completion_tokens: 0, total_tokens: 500_000 }, { "acme/model": { inputPerMtok: 4 } })).toEqual({ inputUsd: 2, outputUsd: 0, totalUsd: 2 });
@@ -96,7 +109,7 @@ describe("cost passthrough (LES-54)", () => {
     expect(m.cost?.totalUsd).toBeCloseTo(100 / 1e6 * 0.5 + 50 / 1e6 * 1.5 + 200 / 1e6 * 2 + 100 / 1e6 * 4, 12);
     expect(m.cost?.byRole.wonder).toBeDefined();
     const withCost = renderRunSummary({ verdict: "accepted", findingsKept: [], findingsDropped: [], editsKept: [], editsDropped: [], manifest: m });
-    expect(withCost).toContain("Cost: $");
+    expect(withCost).toContain("Cost (estimated,");
     const bare = new ManifestBuilder(); bare.sparkModel = "unknown/x";
     const m2 = bare.build(); expect(m2.cost).toBeUndefined();
     expect(renderRunSummary({ verdict: "reviewed", findingsKept: [], findingsDropped: [], editsKept: [], editsDropped: [], manifest: m2 })).not.toContain("Cost:");

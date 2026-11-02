@@ -11,6 +11,8 @@ export interface ReviewJob {
   updatedAt: string;
   attempts: number;
   error?: string;
+  idempotencyKey?: string;
+  idempotencyKeys?: string[];
 }
 
 export class StoreFullError extends Error {}
@@ -89,13 +91,18 @@ export class ReviewJobStore {
 
   findByIdempotencyKey(key: string): ReviewJob | undefined {
     this.assertOpen();
-    for (const job of this.jobs.values()) if ((job as unknown as Record<string,unknown>).idempotencyKey === key) return structuredClone(job);
+    for (const job of this.jobs.values()) if (job.idempotencyKey === key || job.idempotencyKeys?.includes(key)) return structuredClone(job);
     return undefined;
   }
   saveIdempotencyKey(id: string, key: string): void {
-    const job = this.jobs.get(id); if (!job) return;
-    (job as unknown as Record<string,unknown>).idempotencyKey = key;
+    this.assertOpen();
+    const current = this.jobs.get(id);
+    if (!current) throw new Error('unknown job');
+    const existing = this.findByIdempotencyKey(key);
+    if (existing && existing.id !== id) throw new Error('idempotency key already bound');
+    const job = { ...current, idempotencyKey: current.idempotencyKey ?? key, idempotencyKeys: [...new Set([...(current.idempotencyKeys ?? []), ...(current.idempotencyKey ? [current.idempotencyKey] : []), key])] };
     this.atomicWrite(join(this.directory, `${id}.job.json`), job);
+    this.jobs.set(id, job);
   }
   find(request: ReviewSubmission): ReviewJob | undefined { this.assertOpen(); return this.get(this.identity(request)); }
   get(id: string): ReviewJob | undefined {
@@ -105,13 +112,13 @@ export class ReviewJobStore {
   }
   list(): ReviewJob[] { this.assertOpen(); return [...this.jobs.values()].map((job) => structuredClone(job)); }
 
-  create(request: ReviewSubmission): { job: ReviewJob; created: boolean } {
+  create(request: ReviewSubmission, idempotencyKey?: string): { job: ReviewJob; created: boolean } {
     this.assertOpen();
     const prior = this.find(request);
     if (prior) return { job: prior, created: false };
     if (this.jobs.size >= this.maxJobs) throw new StoreFullError("job storage limit reached; archive old completed jobs before accepting more work");
     const now = new Date().toISOString();
-    const job: ReviewJob = { id: this.identity(request), request: structuredClone(request), state: "queued", createdAt: now, updatedAt: now, attempts: 0 };
+    const job: ReviewJob = { id: this.identity(request), request: structuredClone(request), state: "queued", createdAt: now, updatedAt: now, attempts: 0, ...(idempotencyKey ? { idempotencyKey } : {}) };
     this.atomicWrite(join(this.directory, `${job.id}.job.json`), job);
     this.jobs.set(job.id, job);
     return { job: structuredClone(job), created: true };

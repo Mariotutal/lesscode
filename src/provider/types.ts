@@ -44,7 +44,7 @@ export interface ChatCompletionResult {
 
 export type FetchLike = (
   url: string,
-  init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal },
+  init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal; redirect?: "error" },
 ) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
 
 /** Minimal dependency injection point so tests can stub the wire. */
