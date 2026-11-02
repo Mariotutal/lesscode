@@ -16,6 +16,7 @@ export default withMermaid(
         { text: 'Architecture', link: '/architecture' },
         { text: 'Providers', link: '/providers' },
         { text: 'Measurements', link: '/eval-live-runs' },
+        { text: 'Consumers', link: '/consumers' },
       ],
       sidebar: [
         {
