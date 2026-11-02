@@ -146,7 +146,7 @@ export function createReviewService(config: ReviewServiceConfig, dependencies: {
         if (prior) { respond(response, 200, { ...prior, reviewRunId: prior.id }); return; }
         if (queue.length >= maxQueued) throw new HttpError(503, "review queue is full");
         const { job } = store.create(input);
-        if (idempotencyKey) { try { (store as unknown as { saveIdempotencyKey?: (id:string,k:string)=>void }).saveIdempotencyKey?.(job.id, idempotencyKey); } catch {}
+        if (idempotencyKey) { try { (store as unknown as { saveIdempotencyKey?: (id:string,k:string)=>void }).saveIdempotencyKey?.(job.id, idempotencyKey); } catch (error) { void error; }
           (job as unknown as Record<string,unknown>).idempotencyKey = idempotencyKey; }
         queue.push(job.id);
         respond(response, 202, { ...job, reviewRunId: job.id });
