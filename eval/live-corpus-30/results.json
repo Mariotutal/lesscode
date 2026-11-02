@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-02T21:51:11.789Z",
-  "mode": "dry-run",
+  "generatedAt": "2026-11-02T21:56:09.172Z",
+  "mode": "live",
   "note": "dry-run uses scripted GuestClient, MCP InMemory, and CLI with fake key envelope check; no fixtures/sealed read; enable EVAL_LIVE=1 with real keys for live model",
   "results": [
     {
@@ -12,8 +12,8 @@
       "license": "MIT",
       "baseShaPlaceholder": "0000000000000000000000000000000000000000",
       "headShaPlaceholder": "1111111111111111111111111111111111111111",
-      "actualBaseSha": "df941958e802dae80ebc02bc153655e5a4cd22f5",
-      "actualHeadSha": "ddaa2d348877928b6ec5308e699fff857aef4b34",
+      "actualBaseSha": "9a74d949446400f54745ce2f026362be3ff6c80c",
+      "actualHeadSha": "9d3484026dea82fcf246f0660499f35cd97ef489",
       "verdicts": {
         "guest": "reviewed",
         "mcp": "failed",
@@ -45,8 +45,8 @@
       "license": "MIT",
       "baseShaPlaceholder": "0000000000000000000000000000000000000000",
       "headShaPlaceholder": "1111111111111111111111111111111111111111",
-      "actualBaseSha": "cce878a3183e8a8021ad2792542ae0a19ea85572",
-      "actualHeadSha": "dc5cd91b08df81aa3c3ecbce5fab96a5a6483807",
+      "actualBaseSha": "e09946b512dd02eb9e8c2cd512b1ce1c9a4be2ac",
+      "actualHeadSha": "d07c60e96ad2b7592d93f20615b267e35b4e56ac",
       "verdicts": {
         "guest": "reviewed",
         "mcp": "failed",
@@ -78,8 +78,8 @@
       "license": "MIT",
       "baseShaPlaceholder": "0000000000000000000000000000000000000000",
       "headShaPlaceholder": "1111111111111111111111111111111111111111",
-      "actualBaseSha": "b42ad1a92a66443581db11a9cc38c6d2f904873b",
-      "actualHeadSha": "e8bee7d05be17505f16f0bde4df4a72eb8ca3195",
+      "actualBaseSha": "39300f1e3a0f59a62b63db9ea8fcbcb1b7461ca8",
+      "actualHeadSha": "451e5654082f162e6a52e5886e64d6e6f566df1d",
       "verdicts": {
         "guest": "reviewed",
         "mcp": "failed",
@@ -111,8 +111,8 @@
       "license": "MIT",
       "baseShaPlaceholder": "0000000000000000000000000000000000000000",
       "headShaPlaceholder": "1111111111111111111111111111111111111111",
-      "actualBaseSha": "f1b9d7f000452aa9b985b4166891bb36feabf628",
-      "actualHeadSha": "264334024d6fcbe866953bdf04c052694fb1dd02",
+      "actualBaseSha": "8d70ac8fdfec02e888e41baade335bb2b9bcec52",
+      "actualHeadSha": "51525cdb2812edc5682cf3fb647d5733964f7934",
       "verdicts": {
         "guest": "reviewed",
         "mcp": "failed",
@@ -144,8 +144,8 @@
       "license": "MIT",
       "baseShaPlaceholder": "0000000000000000000000000000000000000000",
       "headShaPlaceholder": "1111111111111111111111111111111111111111",
-      "actualBaseSha": "c4d21173ba936ba75e36ddfbd71bdcc19024b557",
-      "actualHeadSha": "078f5bc2ee77af4f0432d064c8e1ebdec1776971",
+      "actualBaseSha": "d4cac85e0bd3dbd2cb9d922d0f367276572cbcef",
+      "actualHeadSha": "59b92d88fc01d7581056575287c22f1c8e492b39",
       "verdicts": {
         "guest": "reviewed",
         "mcp": "failed",
@@ -177,8 +177,8 @@
       "license": "MIT",
       "baseShaPlaceholder": "0000000000000000000000000000000000000000",
       "headShaPlaceholder": "1111111111111111111111111111111111111111",
-      "actualBaseSha": "0a4d18c0fe87babf5256649d6f5082505f1e455e",
-      "actualHeadSha": "0ccabfa2f5847f5ffc746ef05dc35988e576cd1c",
+      "actualBaseSha": "78c56fd46bc163bea6ee6b67cda29bae2675594c",
+      "actualHeadSha": "4c99d7041ad61d853da87b2a6d48a02be6e57711",
       "verdicts": {
         "guest": "reviewed",
         "mcp": "failed",
@@ -210,8 +210,8 @@
       "license": "MIT",
       "baseShaPlaceholder": "0000000000000000000000000000000000000000",
       "headShaPlaceholder": "1111111111111111111111111111111111111111",
-      "actualBaseSha": "e27fc5f1b081ab217f626c3ca6e1d82b053b610b",
-      "actualHeadSha": "56cc4e9335ff85f83a417dba6f504a630fcd55da",
+      "actualBaseSha": "60d0e84d1e7215864f0ce2aab61ce2ed98855641",
+      "actualHeadSha": "d61ad41a20b6d41cb0e6b783023270a71c2beacb",
       "verdicts": {
         "guest": "reviewed",
         "mcp": "failed",
@@ -243,8 +243,8 @@
       "license": "MIT",
       "baseShaPlaceholder": "0000000000000000000000000000000000000000",
       "headShaPlaceholder": "1111111111111111111111111111111111111111",
-      "actualBaseSha": "7aeb5b148940d28aac53e96fa1b8ca78689aa07b",
-      "actualHeadSha": "1297869612f2163b3c0b8b45627edbbff70899c8",
+      "actualBaseSha": "4256cfbd1088f59a6d5a5fc9d37536efce27d8eb",
+      "actualHeadSha": "879d2d2553788ace7b97e4f9ad001245660e26d5",
       "verdicts": {
         "guest": "reviewed",
         "mcp": "failed",
@@ -276,8 +276,8 @@
       "license": "MIT",
       "baseShaPlaceholder": "0000000000000000000000000000000000000000",
       "headShaPlaceholder": "1111111111111111111111111111111111111111",
-      "actualBaseSha": "8317a8a70eba85620fbd49c76ff713b87c937e03",
-      "actualHeadSha": "a44f35542f62dbb9dabbb683352b4e9f8c56ad66",
+      "actualBaseSha": "a4f220f93a698e9b389620c1393f7da90a4c1f33",
+      "actualHeadSha": "b0efaaf2b9d1a0124e7b8407af091d32d31ebe00",
       "verdicts": {
         "guest": "reviewed",
         "mcp": "failed",
