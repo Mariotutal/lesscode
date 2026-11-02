@@ -5,6 +5,8 @@ export interface ProviderConfig {
   apiKey: string;
   model: string;
   provider?: string;
+  /** Optional per-model pricing from `.lesscode.json` (USD per 1M tokens). */
+  pricing?: Record<string, { inputPerMtok?: number; outputPerMtok?: number }>;
 }
 
 /** Alias kept while callers migrate from the Meta-specific name. */

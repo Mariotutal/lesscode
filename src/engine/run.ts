@@ -116,7 +116,7 @@ export async function runReview(opts: ReviewRequest): Promise<RunRecord> {
     const preparationChanges = await changedPaths(repo, head);
     if (preparationChanges.length) throw new Error(`dependency preparation changed the source snapshot: ${preparationChanges.join(", ")}`);
     let visible = scopedReviewFiles(repo, { intentFiles: intent, changedFiles: changed, relatedTests });
-    const spark = instrument(opts.sparkClient ?? createModelClient("spark"), "spark", manifest, opts.signal);
+    const spark = instrument(opts.sparkClient ?? createModelClient("spark", { cwd: opts.checkout }), "spark", manifest, opts.signal);
     const seeds = new Set([...expandIntentFiles(listClassifiableFiles(repo), intent), ...changed]);
     while (visible.length && !seeds.has(visible.at(-1)!) && estimateTokens(readCheckoutSources(repo, visible).map((s) => s.text).join("\n")) > contextWindow(spark.config.model)) visible = visible.slice(0, -1);
     for (const source of readCheckoutSources(repo, visible)) texts.set(source.file, source.text);
@@ -132,7 +132,7 @@ export async function runReview(opts: ReviewRequest): Promise<RunRecord> {
       unknownConventions: classification.unknownConventions, refusedConventions: classification.refusedConventions.map((d) => ({ convention: d.finding.convention ?? "(none)", file: d.finding.file, citations: d.finding.citations, rationale: d.status === "refused" ? d.reason : d.finding.rationale })) });
     record.audit.reasons.push(...classification.scopeExemptions.map((e) => e.reason), ...classification.verificationDropped.map((d) => `finding for ${d.finding.file} kept out of the patch: ${d.reason}`), ...classification.unknownConventions.map((name) => `unknown convention "${name}" in lesscode-conventions.json: ignored`));
     stage = "plan";
-    const wonder = instrument(opts.wonderClient ?? createModelClient("wonder"), "wonder", manifest, opts.signal);
+    const wonder = instrument(opts.wonderClient ?? createModelClient("wonder", { cwd: opts.checkout }), "wonder", manifest, opts.signal);
     const plan = await manifest.time("plan", () => planOnce({ checkoutDir: repo, findings: record.findings, files: visible, changedFiles: changed, baseRef: base, client: wonder }));
     record.audit.plan = { edits: plan.edits.length, skipped: plan.skipped, model: plan.model, modelCalls: plan.modelCalls, usage: plan.usage, review: plan.review };
     for (const skip of plan.skipped) record.edits.push({ findingId: record.findingIds[skip.findingIndex] ?? `unknown-${skip.findingIndex}`, findingIndex: skip.findingIndex, action: "skip", status: "skipped", files: [], reason: reason("planner-skip", "plan", skip.reason) });

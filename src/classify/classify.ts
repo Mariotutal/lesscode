@@ -166,7 +166,7 @@ export async function classifyFindings(opts: ClassifyOptions): Promise<ClassifyR
   if (isSealedPath(opts.checkoutDir)) throw new Error("refusing to classify a sealed directory");
   const files = opts.files?.filter((f) => !isSealedPath(f));
   const sources = readCheckoutSources(opts.checkoutDir, files);
-  const client = opts.client ?? createModelClient("spark");
+  const client = opts.client ?? createModelClient("spark", { cwd: opts.checkoutDir });
 
   const prompt = sources.map(numberedSource).join("\n\n");
   const baseMessages = [
