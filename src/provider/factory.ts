@@ -119,7 +119,7 @@ export function resolveProviderConfig(
   // silently hijack a provider pinned by the committed file.
   const baseUrlRaw =
     opts?.explicit?.baseUrl ??
-    pick(env, ["LESSCODE_API_BASE_URL", `LESSCODE_${roleUpper}_API_BASE_URL`], warn) ??
+    pick(env, [`LESSCODE_${roleUpper}_API_BASE_URL`, "LESSCODE_API_BASE_URL"], warn) ??
     named?.baseUrl ??
     pick(env, ["META_API_BASE_URL"], warn) ?? DEFAULT_API_BASE_URL;
   const apiKey =
@@ -166,6 +166,7 @@ export interface CreateModelClientOptions {
   cwd?: string;
   trusted?: boolean;
   trustedPolicy?: TrustedPolicy | null;
+  fileConfig?: LesscodeConfig | null;
   config?: ProviderConfig;
   fetchFn?: FetchLike;
   timeoutMs?: number;
@@ -176,7 +177,7 @@ export interface CreateModelClientOptions {
 }
 
 export function createModelClient(role: ModelRole = "spark", opts?: CreateModelClientOptions): ModelClient {
-  const config = opts?.config ?? resolveProviderConfig(role, opts?.env, { warn: opts?.warn, trustedPolicy: opts?.trustedPolicy, ...(opts?.cwd ? { cwd: opts.cwd, trusted: opts.trusted === true } : {}) });
+  const config = opts?.config ?? resolveProviderConfig(role, opts?.env, { warn: opts?.warn, trustedPolicy: opts?.trustedPolicy, ...(opts && "fileConfig" in opts ? { fileConfig: opts.fileConfig } : {}), ...(opts?.cwd ? { cwd: opts.cwd, trusted: opts.trusted === true } : {}) });
   const fetchFn: FetchLike =
     opts?.fetchFn ??
     (async (url, init) => {
