@@ -13,33 +13,53 @@ export interface TokenUsage {
   total_tokens: number;
 }
 
-export interface ModelPricing { inputPerMtok?: number; outputPerMtok?: number }
+export interface ModelPricing { inputPerMtok?: number; outputPerMtok?: number; source?: string; version?: string }
 
-/** Derived cost in USD. Present only when a pricing entry matched a model that reported usage. */
+/** Incomplete cost: some billable usage could not be priced */
+export interface UnpricedUsage { role: "spark" | "wonder"; model: string; prompt_tokens: number; completion_tokens: number; total_tokens: number; reason: string }
+
+/** Derived cost in USD. */
 export interface RunCost {
   currency: "USD";
   inputUsd: number;
   outputUsd: number;
   totalUsd: number;
   byRole: { spark?: { inputUsd: number; outputUsd: number; totalUsd: number }; wonder?: { inputUsd: number; outputUsd: number; totalUsd: number } };
+  completeness: "complete" | "partial" | "unknown";
+  unpriced: UnpricedUsage[];
+  pricingSource: string;
 }
 
 /**
  * Default pricing table (USD per 1M tokens), used when `.lesscode.json`
- * has no `pricing` entry for the model. These are starting estimates for
+ * has no `pricing` entry for the model. These are estimates for
  * cost visibility only — override them per model in `.lesscode.json`.
  * A missing entry means no cost is derived; cost never gates a run.
  */
 export const DEFAULT_PRICING: Record<string, ModelPricing> = {
-  "muse-spark-1.3": { inputPerMtok: 0.5, outputPerMtok: 1.5 },
-  "muse-wonder-1.0": { inputPerMtok: 3, outputPerMtok: 15 },
+  "muse-spark-1.3": { inputPerMtok: 0.5, outputPerMtok: 1.5, source: "builtin", version: "2026-01-01" },
+  "muse-wonder-1.0": { inputPerMtok: 3, outputPerMtok: 15, source: "builtin", version: "2026-01-01" },
 };
+
+function isFiniteNonNeg(n: unknown): n is number { return typeof n==="number" && Number.isFinite(n) && n>=0; }
+
+export function validateUsage(u: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined): { valid: boolean; usage?: TokenUsage; reason?: string } {
+  if (!u) return { valid:false, reason:"usage not reported" };
+  const hasPrompt = u.prompt_tokens !== undefined, hasCompletion = u.completion_tokens !== undefined;
+  if (!hasPrompt && !hasCompletion && u.total_tokens===undefined) return { valid:false, reason:"usage not reported" };
+  if (hasPrompt && !isFiniteNonNeg(u.prompt_tokens)) return { valid:false, reason:"invalid prompt_tokens" };
+  if (hasCompletion && !isFiniteNonNeg(u.completion_tokens)) return { valid:false, reason:"invalid completion_tokens" };
+  if (u.total_tokens!==undefined && !isFiniteNonNeg(u.total_tokens)) return { valid:false, reason:"invalid total_tokens" };
+  return { valid:true, usage:{ prompt_tokens: u.prompt_tokens??0, completion_tokens: u.completion_tokens??0, total_tokens: u.total_tokens ?? ((u.prompt_tokens??0)+(u.completion_tokens??0)) } };
+}
 
 /** Price one role's usage; undefined when no rate is known for the model. */
 export function priceUsage(model: string | undefined, usage: TokenUsage, pricing?: Record<string, ModelPricing>): RunCost["byRole"]["spark"] | undefined {
-  if (!model || (usage.prompt_tokens === 0 && usage.completion_tokens === 0)) return undefined;
+  if (!model) return undefined;
   const rate = pricing?.[model] ?? DEFAULT_PRICING[model];
   if (!rate || (rate.inputPerMtok === undefined && rate.outputPerMtok === undefined)) return undefined;
+  // partial rates: price only the side with a rate, other side unpriced is handled by caller completeness
+  if ((usage.prompt_tokens>0 && rate.inputPerMtok===undefined) || (usage.completion_tokens>0 && rate.outputPerMtok===undefined)) return undefined;
   const inputUsd = (usage.prompt_tokens / 1_000_000) * (rate.inputPerMtok ?? 0);
   const outputUsd = (usage.completion_tokens / 1_000_000) * (rate.outputPerMtok ?? 0);
   return { inputUsd, outputUsd, totalUsd: inputUsd + outputUsd };
@@ -92,12 +112,24 @@ export class ManifestBuilder {
   readonly responseModels: { spark?: string; wonder?: string } = {};
   readonly usageByRole: Record<"spark" | "wonder", TokenUsage> = { spark: emptyUsage(), wonder: emptyUsage() };
   readonly pricingByRole: Record<"spark" | "wonder", Record<string, ModelPricing> | undefined> = { spark: undefined, wonder: undefined };
+  readonly calls: { role: "spark"|"wonder"; model: string; usage?: TokenUsage; invalidReason?: string }[] = [];
+  readonly unpriced: UnpricedUsage[] = [];
 
   /** Record one response: aggregate + per-role usage, and the provider-returned model id. */
   recordResponse(role: "spark" | "wonder", usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }, responseModel?: string): void {
-    addUsage(this.usage, usage);
-    addUsage(this.usageByRole[role], usage);
+    const model = responseModel ?? (role==="spark"? this.sparkModel : this.wonderModel);
     if (responseModel) this.responseModels[role] = responseModel;
+    const v = validateUsage(usage);
+    if (!v.valid) {
+      // distinguish omitted vs invalid; don't add to totals
+      this.calls.push({ role, model: model||"(unknown)", invalidReason: v.reason });
+      if (usage !== undefined) this.unpriced.push({ role, model: model||"(unknown)", prompt_tokens:0, completion_tokens:0, total_tokens:0, reason: v.reason! });
+      return;
+    }
+    // zero usage is valid but not billable
+    addUsage(this.usage, v.usage);
+    addUsage(this.usageByRole[role], v.usage);
+    this.calls.push({ role, model: model||"(unknown)", usage: v.usage });
   }
 
   setPricing(role: "spark" | "wonder", pricing?: Record<string, ModelPricing>): void {
@@ -121,15 +153,35 @@ export class ManifestBuilder {
     this.phasesMs.overhead = Math.max(0, totalMs - measured);
     const byRole: RunCost["byRole"] = {};
     const pricing: NonNullable<RunManifest["pricing"]> = {};
-    for (const role of ["spark", "wonder"] as const) {
-      const effective = this.responseModels[role] ?? (role === "spark" ? this.sparkModel : this.wonderModel);
-      const rate = this.pricingByRole[role]?.[effective] ?? DEFAULT_PRICING[effective];
-      if (rate) pricing[role] = rate;
-      const priced = priceUsage(effective, this.usageByRole[role], this.pricingByRole[role]);
-      if (priced) byRole[role] = priced;
+    const byRoleAgg: Record<string, TokenUsage> = {};
+    const unpriced: UnpricedUsage[] = [...this.unpriced];
+    // price per call by actual model, aggregating
+    for (const c of this.calls) {
+      if (!c.usage) continue;
+      // skip zero-usage calls for pricing
+      if (c.usage.prompt_tokens===0 && c.usage.completion_tokens===0) continue;
+      const priced = priceUsage(c.model, c.usage, this.pricingByRole[c.role]);
+      if (priced) {
+        const agg = byRole[c.role] ?? (byRole[c.role] = { inputUsd:0, outputUsd:0, totalUsd:0 });
+        agg.inputUsd += priced.inputUsd; agg.outputUsd += priced.outputUsd; agg.totalUsd += priced.totalUsd;
+      } else {
+        const rate = this.pricingByRole[c.role]?.[c.model] ?? DEFAULT_PRICING[c.model];
+        let reason = "unknown model pricing";
+        if (rate && ((c.usage.prompt_tokens>0 && rate.inputPerMtok===undefined) || (c.usage.completion_tokens>0 && rate.outputPerMtok===undefined))) reason="partial rate missing input/output price";
+        unpriced.push({ role: c.role, model: c.model, prompt_tokens: c.usage.prompt_tokens, completion_tokens: c.usage.completion_tokens, total_tokens: c.usage.total_tokens, reason });
+      }
+      // collect pricing source
+      const effective = c.model;
+      const rate = this.pricingByRole[c.role]?.[effective] ?? DEFAULT_PRICING[effective];
+      if (rate && !pricing[c.role]) pricing[c.role]=rate;
     }
-    const cost: RunCost | undefined = Object.keys(byRole).length
-      ? { currency: "USD", inputUsd: (byRole.spark?.inputUsd ?? 0) + (byRole.wonder?.inputUsd ?? 0), outputUsd: (byRole.spark?.outputUsd ?? 0) + (byRole.wonder?.outputUsd ?? 0), totalUsd: (byRole.spark?.totalUsd ?? 0) + (byRole.wonder?.totalUsd ?? 0), byRole }
+    // determine completeness
+    const hasBillableCalls = this.calls.some(c=>c.usage && (c.usage.prompt_tokens>0 || c.usage.completion_tokens>0));
+    const hasPriced = Object.keys(byRole).length>0;
+    const completeness: RunCost["completeness"] = !hasBillableCalls ? "unknown" : unpriced.length===0 && hasPriced ? "complete" : hasPriced ? "partial" : "unknown";
+    const pricingSource = Object.values(pricing).some(r=>r.source==="builtin") ? "builtin+override" : Object.keys(pricing).length?"custom":"none";
+    const cost: RunCost | undefined = (hasPriced || unpriced.length>0)
+      ? { currency: "USD", inputUsd: (byRole.spark?.inputUsd ?? 0) + (byRole.wonder?.inputUsd ?? 0), outputUsd: (byRole.spark?.outputUsd ?? 0) + (byRole.wonder?.outputUsd ?? 0), totalUsd: (byRole.spark?.totalUsd ?? 0) + (byRole.wonder?.totalUsd ?? 0), byRole, completeness, unpriced, pricingSource }
       : undefined;
     return {
       models: { spark: this.sparkModel, wonder: this.wonderModel },
@@ -176,7 +228,7 @@ export function renderRunSummary(s: HumanRunSummary): string {
     "",
     `Models: spark=${m.models.spark}, wonder=${m.models.wonder}; calls=${m.modelCalls} (spark ${m.callsByModel.spark}, wonder ${m.callsByModel.wonder})`,
     `Tokens: prompt=${m.usage.prompt_tokens}, completion=${m.usage.completion_tokens}, total=${m.usage.total_tokens}`,
-    ...(m.cost ? [`Cost: $${m.cost.totalUsd.toFixed(6)} (input $${m.cost.inputUsd.toFixed(6)}, output $${m.cost.outputUsd.toFixed(6)})`] : []),
+    ...(m.cost ? [(m.cost.completeness==="complete" ? `Cost (estimated, ${m.cost.pricingSource}): $${m.cost.totalUsd.toFixed(6)} (input $${m.cost.inputUsd.toFixed(6)}, output $${m.cost.outputUsd.toFixed(6)})` : `Cost (partial, known subtotal $${m.cost.totalUsd.toFixed(6)}; unpriced: ${m.cost.unpriced.map(u=>`${u.role}/${u.model} ${u.reason}`).join(", ")})`)] : []),
     ...(m.responseModels.spark || m.responseModels.wonder ? [`Response models: spark=${m.responseModels.spark ?? "(none reported)"}, wonder=${m.responseModels.wonder ?? "(none reported)"}`] : []),
     `Phases: ${Object.entries(m.phasesMs).map(([phase, duration]) => `${phase}=${ms(duration)}`).join(", ")}, total=${ms(m.totalMs)}`,
     `Prompt hashes: ${m.promptHashes.length ? m.promptHashes.join(", ") : "(none)"}`,
