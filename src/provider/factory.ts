@@ -1,5 +1,6 @@
 import type { FetchLike, ModelClient, ModelRole, ProviderConfig } from "./types.js";
 import { loadLesscodeConfig, type LesscodeConfig } from "./configFile.js";
+import { loadTrustedPolicy, resolveFromTrustedPolicy, type TrustedPolicy } from "./policy.js";
 
 export const DEFAULT_API_BASE_URL = "https://api.meta.ai/v1";
 export const META_API_BASE = DEFAULT_API_BASE_URL;
@@ -53,6 +54,8 @@ export interface ResolveProviderOptions {
   cwd?: string;
   /** When true, cwd is treated as trusted (operator-owned). Fetched PR checkouts must not set this. */
   trusted?: boolean;
+  /** Operator-owned trusted policy; when present file `providers` are ignored and aliases must exist in it. */
+  trustedPolicy?: TrustedPolicy | null;
   /** Explicit config; beats env candidate which beats file. Null disables file layer. */
   explicit?: Partial<ProviderConfig> & { provider?: string };
   /** Pre-loaded file config (mainly tests); `cwd` search is skipped. */
@@ -74,8 +77,36 @@ export function resolveProviderConfig(
 ): ProviderConfig {
   const warn = opts?.warn;
   const roleUpper = role.toUpperCase() as "SPARK" | "WONDER";
+  if (opts?.explicit?.baseUrl && opts?.explicit?.apiKey) {
+    return {
+      baseUrl: opts.explicit.baseUrl.replace(/\/+$/, ""),
+      apiKey: opts.explicit.apiKey,
+      model: opts.explicit.model ?? pick(env, [`LESSCODE_${roleUpper}_MODEL`, "LESSCODE_MODEL", "META_MODEL"], warn) ?? DEFAULT_MODELS[role],
+      ...(opts.explicit.provider ? { provider: opts.explicit.provider } : {}),
+    };
+  }
+  const trustedPolicy = opts?.trustedPolicy !== undefined ? opts.trustedPolicy : loadTrustedPolicy(env);
   const file: LesscodeConfig | null = opts && "fileConfig" in opts ? (opts.fileConfig ?? null)
     : opts?.cwd && opts?.trusted ? loadLesscodeConfig(opts.cwd).config : null;
+  // Trusted path: repo may only request alias+model, never endpoint/credential
+  if (trustedPolicy) {
+    const fileRef = file?.models?.[role];
+    if (fileRef) {
+      const policyProvider = trustedPolicy.providers[fileRef.provider];
+      if (!policyProvider) throw new Error(`.lesscode.json: models.${role}.provider "${fileRef.provider}" is not in trusted policy`);
+      if (policyProvider.allowedModels && !policyProvider.allowedModels.includes(fileRef.model)) throw new Error(`model "${fileRef.model}" not allowed for provider "${fileRef.provider}"`);
+      const apiKey = env[policyProvider.apiKeyEnv]?.trim();
+      if (!apiKey) throw new Error(`trusted provider "${fileRef.provider}" missing env ${policyProvider.apiKeyEnv}`);
+      return {
+        baseUrl: policyProvider.baseUrl.replace(/\/+$/, ""),
+        apiKey,
+        model: fileRef.model,
+        provider: fileRef.provider,
+        ...(file?.pricing ? { pricing: file.pricing } : {}),
+      };
+    }
+    return resolveFromTrustedPolicy(role, trustedPolicy, env);
+  }
   const ref = file?.models?.[role];
   const named = ref ? file?.providers?.[ref.provider] : undefined;
   if (ref && !named) throw new Error(`.lesscode.json: models.${role}.provider "${ref.provider}" is not defined in providers`);
@@ -131,6 +162,8 @@ export function isTransientStatus(status: number): boolean {
 export interface CreateModelClientOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  trusted?: boolean;
+  trustedPolicy?: TrustedPolicy | null;
   config?: ProviderConfig;
   fetchFn?: FetchLike;
   timeoutMs?: number;
@@ -141,7 +174,7 @@ export interface CreateModelClientOptions {
 }
 
 export function createModelClient(role: ModelRole = "spark", opts?: CreateModelClientOptions): ModelClient {
-  const config = opts?.config ?? resolveProviderConfig(role, opts?.env, { warn: opts?.warn, ...(opts?.cwd ? { cwd: opts.cwd } : {}) });
+  const config = opts?.config ?? resolveProviderConfig(role, opts?.env, { warn: opts?.warn, trustedPolicy: opts?.trustedPolicy, ...(opts?.cwd ? { cwd: opts.cwd, trusted: opts.trusted } : {}) });
   const fetchFn: FetchLike =
     opts?.fetchFn ??
     (async (url, init) => {

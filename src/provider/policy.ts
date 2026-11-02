@@ -1,10 +1,21 @@
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { z } from "zod";
 
-const trustedProviderSchema = z.object({
-  baseUrl: z.string().min(1),
-  apiKeyEnv: z.string().min(1),
-  allowedModels: z.array(z.string().min(1)).optional(),
-}).strict();
+const trustedProviderSchema = z
+  .object({
+    baseUrl: z.string().min(1).refine((v) => {
+      try {
+        validateUrlSecurity(v);
+        return true;
+      } catch {
+        return false;
+      }
+    }, "must be https without credentials"),
+    apiKeyEnv: z.string().min(1),
+    allowedModels: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
 
 export const trustedPolicySchema = z.object({
   version: z.literal(1),
@@ -22,8 +33,44 @@ export function validateUrlSecurity(baseUrl: string): void {
 }
 
 export function hashPolicy(policy: TrustedPolicy): string {
-  const { createHash } = require("node:crypto");
   return createHash("sha256").update(JSON.stringify(policy)).digest("hex").slice(0, 16);
+}
+
+let cachedTrustedPolicy: TrustedPolicy | null | undefined = undefined;
+export function clearTrustedPolicyCache(): void {
+  cachedTrustedPolicy = undefined;
+}
+
+export function loadTrustedPolicy(env: NodeJS.ProcessEnv = process.env, opts?: { noCache?: boolean }): TrustedPolicy | null {
+  if (!opts?.noCache && cachedTrustedPolicy !== undefined) return cachedTrustedPolicy;
+  const raw = env.LESSCODE_TRUSTED_POLICY?.trim() || env.LESSCODE_TRUSTED_POLICY_FILE?.trim();
+  let policy: TrustedPolicy | null = null;
+  if (raw) {
+    let json: unknown;
+    if (raw.startsWith("{")) {
+      try {
+        json = JSON.parse(raw);
+      } catch {
+        throw new Error("LESSCODE_TRUSTED_POLICY is not valid JSON");
+      }
+    } else {
+      if (!existsSync(raw)) throw new Error(`LESSCODE_TRUSTED_POLICY_FILE not found: ${raw}`);
+      try {
+        json = JSON.parse(readFileSync(raw, "utf8"));
+      } catch {
+        throw new Error(`LESSCODE_TRUSTED_POLICY_FILE is not valid JSON: ${raw}`);
+      }
+    }
+    const parsed = trustedPolicySchema.safeParse(json);
+    if (!parsed.success) throw new Error(`trusted policy invalid: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.code}`).join("; ")}`);
+    policy = parsed.data;
+    for (const [name, prov] of Object.entries(policy.providers)) {
+      validateUrlSecurity(prov.baseUrl);
+      if (prov.allowedModels && prov.allowedModels.length === 0) throw new Error(`provider ${name}: allowedModels must be non-empty if set`);
+    }
+  }
+  if (!opts?.noCache) cachedTrustedPolicy = policy;
+  return policy;
 }
 
 export function resolveFromTrustedPolicy(

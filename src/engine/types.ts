@@ -57,7 +57,7 @@ export interface RunRecord {
   revision: { headSha: string; baseSha: string; scope: "declared" | "inferred" } | null;
   /** Auditable model ids the providers returned (`response.model`), when any call reported one. Derived from the manifest. */
   responseModels?: { spark?: string; wonder?: string };
-  execution: { kind: RepositoryExecutor["kind"]; policyVersion: 1; environmentId?: string };
+  execution: { kind: RepositoryExecutor["kind"]; policyVersion: number; policyHash?: string; environmentId?: string };
   findings: AnyFinding[];
   findingIds: string[];
   edits: EditOutcome[];
