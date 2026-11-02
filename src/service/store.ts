@@ -87,6 +87,16 @@ export class ReviewJobStore {
     } finally { rmSync(temporary, { force: true }); }
   }
 
+  findByIdempotencyKey(key: string): ReviewJob | undefined {
+    this.assertOpen();
+    for (const job of this.jobs.values()) if ((job as unknown as Record<string,unknown>).idempotencyKey === key) return structuredClone(job);
+    return undefined;
+  }
+  saveIdempotencyKey(id: string, key: string): void {
+    const job = this.jobs.get(id); if (!job) return;
+    (job as unknown as Record<string,unknown>).idempotencyKey = key;
+    this.atomicWrite(join(this.directory, `${id}.job.json`), job);
+  }
   find(request: ReviewSubmission): ReviewJob | undefined { this.assertOpen(); return this.get(this.identity(request)); }
   get(id: string): ReviewJob | undefined {
     this.assertOpen();

@@ -129,16 +129,25 @@ export function createReviewService(config: ReviewServiceConfig, dependencies: {
       const url = new URL(request.url ?? "/", "http://localhost");
       if (url.pathname === "/reviews" && request.method === "POST") {
         const raw = await readBody(request, maxBodyBytes) as Record<string, unknown>;
-        // V2 allows checkoutTarUrl/base/intent alongside legacy owner/repo/prNumber/expectedHeadSha; allowlist still enforced.
-        if (raw.checkoutTarUrl !== undefined && (typeof raw.checkoutTarUrl !== "string" || !String(raw.checkoutTarUrl).startsWith("https://"))) throw new HttpError(400, "checkoutTarUrl must be an https URL");
         const idempotencyKey = String(request.headers["idempotency-key"] ?? request.headers["x-idempotency-key"] ?? "").trim().slice(0, 128);
+        if (idempotencyKey && !/^[A-Za-z0-9_-]{8,128}$/.test(idempotencyKey)) throw new HttpError(400, "invalid idempotency key");
+        // V2: checkoutTarUrl must be allowlisted https tarball; base/intent validated when present
+        if (raw.checkoutTarUrl !== undefined) {
+          if (typeof raw.checkoutTarUrl !== "string" || !/^https:\/\/[^\s]+$/.test(raw.checkoutTarUrl)) throw new HttpError(400, "checkoutTarUrl must be an https URL");
+          try { const u = new URL(raw.checkoutTarUrl); if (!["github.com","api.github.com","objects.githubusercontent.com"].some(h => u.hostname===h || u.hostname.endsWith("."+h))) throw new Error(); } catch { throw new HttpError(400, "checkoutTarUrl host not allowlisted"); }
+        }
+        if (raw.base !== undefined && (typeof raw.base !== "string" || !/^[a-f0-9]{40,64}$/i.test(raw.base))) throw new HttpError(400, "base must be a commit SHA");
+        if (raw.intent !== undefined && (!Array.isArray(raw.intent) || (raw.intent as unknown[]).some(v=>typeof v!=="string"))) throw new HttpError(400, "intent must be string array");
         const input = submission(raw);
         if (!allowed.has(`${input.owner}/${input.repo}`.toLowerCase())) throw new HttpError(403, "repository is not allowed");
+        // idempotency-key persistence via store lookup
+        if (idempotencyKey) { const byKey = (store as unknown as { findByIdempotencyKey?: (k:string)=>ReviewJob }).findByIdempotencyKey?.(idempotencyKey); if (byKey) { respond(response, 200, { ...byKey, reviewRunId: byKey.id }); return; } }
         const prior = store.find(input);
         if (prior) { respond(response, 200, { ...prior, reviewRunId: prior.id }); return; }
         if (queue.length >= maxQueued) throw new HttpError(503, "review queue is full");
         const { job } = store.create(input);
-        if (idempotencyKey) (job as unknown as Record<string, unknown>).idempotencyKey = idempotencyKey;
+        if (idempotencyKey) { try { (store as unknown as { saveIdempotencyKey?: (id:string,k:string)=>void }).saveIdempotencyKey?.(job.id, idempotencyKey); } catch {}
+          (job as unknown as Record<string,unknown>).idempotencyKey = idempotencyKey; }
         queue.push(job.id);
         respond(response, 202, { ...job, reviewRunId: job.id });
         pump();
