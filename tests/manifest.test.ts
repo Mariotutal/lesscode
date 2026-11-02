@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { createGuestClient, ModelTimeoutError } from "../src/classify/client.js";
+import { ManifestBuilder, priceUsage, renderRunSummary } from "../src/manifest.js";
 import type { GuestClient } from "../src/classify/client.js";
 import { simplify } from "../src/simplify/simplify.js";
 
@@ -77,6 +78,30 @@ function scripted(sparkFindings: unknown, wonderEdits: unknown): GuestClient {
     },
   } as GuestClient;
 }
+
+describe("cost passthrough (LES-54)", () => {
+  it("derives cost from usage with the default table and with pricing overrides", () => {
+    expect(priceUsage("muse-spark-1.3", { prompt_tokens: 1_000_000, completion_tokens: 1_000_000, total_tokens: 2_000_000 })).toEqual({ inputUsd: 0.5, outputUsd: 1.5, totalUsd: 2 });
+    expect(priceUsage("acme/model", { prompt_tokens: 500_000, completion_tokens: 0, total_tokens: 500_000 }, { "acme/model": { inputPerMtok: 4 } })).toEqual({ inputUsd: 2, outputUsd: 0, totalUsd: 2 });
+    expect(priceUsage("unknown/model", { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 })).toBeUndefined();
+    expect(priceUsage("muse-spark-1.3", { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })).toBeUndefined();
+  });
+  it("manifest carries responseModels + cost, and renderRunSummary prints cost only when present", () => {
+    const b = new ManifestBuilder(); b.sparkModel = "muse-spark-1.3"; b.wonderModel = "acme/wonder";
+    b.setPricing("wonder", { "acme/wonder": { inputPerMtok: 2, outputPerMtok: 4 } });
+    b.recordResponse("spark", { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 }, "muse-spark-1.3");
+    b.recordResponse("wonder", { prompt_tokens: 200, completion_tokens: 100, total_tokens: 300 });
+    const m = b.build();
+    expect(m.responseModels).toEqual({ spark: "muse-spark-1.3" });
+    expect(m.cost?.totalUsd).toBeCloseTo(100 / 1e6 * 0.5 + 50 / 1e6 * 1.5 + 200 / 1e6 * 2 + 100 / 1e6 * 4, 12);
+    expect(m.cost?.byRole.wonder).toBeDefined();
+    const withCost = renderRunSummary({ verdict: "accepted", findingsKept: [], findingsDropped: [], editsKept: [], editsDropped: [], manifest: m });
+    expect(withCost).toContain("Cost: $");
+    const bare = new ManifestBuilder(); bare.sparkModel = "unknown/x";
+    const m2 = bare.build(); expect(m2.cost).toBeUndefined();
+    expect(renderRunSummary({ verdict: "reviewed", findingsKept: [], findingsDropped: [], editsKept: [], editsDropped: [], manifest: m2 })).not.toContain("Cost:");
+  });
+});
 
 describe("run manifest (LES-26)", () => {
   it("scripted simplify run prints a manifest naming both models, phases summing to the run", async () => {

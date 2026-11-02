@@ -13,8 +13,42 @@ export interface TokenUsage {
   total_tokens: number;
 }
 
+export interface ModelPricing { inputPerMtok?: number; outputPerMtok?: number }
+
+/** Derived cost in USD. Present only when a pricing entry matched a model that reported usage. */
+export interface RunCost {
+  currency: "USD";
+  inputUsd: number;
+  outputUsd: number;
+  totalUsd: number;
+  byRole: { spark?: { inputUsd: number; outputUsd: number; totalUsd: number }; wonder?: { inputUsd: number; outputUsd: number; totalUsd: number } };
+}
+
+/**
+ * Default pricing table (USD per 1M tokens), used when `.lesscode.json`
+ * has no `pricing` entry for the model. These are starting estimates for
+ * cost visibility only — override them per model in `.lesscode.json`.
+ * A missing entry means no cost is derived; cost never gates a run.
+ */
+export const DEFAULT_PRICING: Record<string, ModelPricing> = {
+  "muse-spark-1.3": { inputPerMtok: 0.5, outputPerMtok: 1.5 },
+  "muse-wonder-1.0": { inputPerMtok: 3, outputPerMtok: 15 },
+};
+
+/** Price one role's usage; undefined when no rate is known for the model. */
+export function priceUsage(model: string | undefined, usage: TokenUsage, pricing?: Record<string, ModelPricing>): RunCost["byRole"]["spark"] | undefined {
+  if (!model || (usage.prompt_tokens === 0 && usage.completion_tokens === 0)) return undefined;
+  const rate = pricing?.[model] ?? DEFAULT_PRICING[model];
+  if (!rate || (rate.inputPerMtok === undefined && rate.outputPerMtok === undefined)) return undefined;
+  const inputUsd = (usage.prompt_tokens / 1_000_000) * (rate.inputPerMtok ?? 0);
+  const outputUsd = (usage.completion_tokens / 1_000_000) * (rate.outputPerMtok ?? 0);
+  return { inputUsd, outputUsd, totalUsd: inputUsd + outputUsd };
+}
+
 export interface RunManifest {
   models: { spark: string; wonder: string };
+  /** Model id the provider actually returned in `response.model`, per role, when it sent one. Auditable against the gateway. */
+  responseModels: { spark?: string; wonder?: string };
   modelCalls: number;
   /** Per-model call counts (includes Spark's one validation retry when taken). */
   callsByModel: { spark: number; wonder: number };
@@ -24,6 +58,10 @@ export interface RunManifest {
   totalMs: number;
   /** SHA-256 (hex) of each prompt sent, in send order. Hashes only. */
   promptHashes: string[];
+  /** Pricing applied per role (after `.lesscode.json` / default-table lookup), when known. */
+  pricing?: { spark?: ModelPricing; wonder?: ModelPricing };
+  /** Derived from `usage` and pricing. Informational only; never blocks the gate. */
+  cost?: RunCost;
 }
 
 export function hashPrompt(messages: readonly ChatMessage[]): string {
@@ -51,6 +89,20 @@ export class ManifestBuilder {
   wonderCalls = 0;
   sparkModel = "";
   wonderModel = "";
+  readonly responseModels: { spark?: string; wonder?: string } = {};
+  readonly usageByRole: Record<"spark" | "wonder", TokenUsage> = { spark: emptyUsage(), wonder: emptyUsage() };
+  readonly pricingByRole: Record<"spark" | "wonder", Record<string, ModelPricing> | undefined> = { spark: undefined, wonder: undefined };
+
+  /** Record one response: aggregate + per-role usage, and the provider-returned model id. */
+  recordResponse(role: "spark" | "wonder", usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }, responseModel?: string): void {
+    addUsage(this.usage, usage);
+    addUsage(this.usageByRole[role], usage);
+    if (responseModel) this.responseModels[role] = responseModel;
+  }
+
+  setPricing(role: "spark" | "wonder", pricing?: Record<string, ModelPricing>): void {
+    if (pricing) this.pricingByRole[role] = pricing;
+  }
   private readonly started = performance.now();
 
   /** Time an async phase; the elapsed ms is added to that phase. */
@@ -67,14 +119,29 @@ export class ManifestBuilder {
     const totalMs = performance.now() - this.started;
     const measured = Object.entries(this.phasesMs).filter(([phase]) => phase !== "overhead").reduce((sum, [, ms]) => sum + ms, 0);
     this.phasesMs.overhead = Math.max(0, totalMs - measured);
+    const byRole: RunCost["byRole"] = {};
+    const pricing: NonNullable<RunManifest["pricing"]> = {};
+    for (const role of ["spark", "wonder"] as const) {
+      const effective = this.responseModels[role] ?? (role === "spark" ? this.sparkModel : this.wonderModel);
+      const rate = this.pricingByRole[role]?.[effective] ?? DEFAULT_PRICING[effective];
+      if (rate) pricing[role] = rate;
+      const priced = priceUsage(effective, this.usageByRole[role], this.pricingByRole[role]);
+      if (priced) byRole[role] = priced;
+    }
+    const cost: RunCost | undefined = Object.keys(byRole).length
+      ? { currency: "USD", inputUsd: (byRole.spark?.inputUsd ?? 0) + (byRole.wonder?.inputUsd ?? 0), outputUsd: (byRole.spark?.outputUsd ?? 0) + (byRole.wonder?.outputUsd ?? 0), totalUsd: (byRole.spark?.totalUsd ?? 0) + (byRole.wonder?.totalUsd ?? 0), byRole }
+      : undefined;
     return {
       models: { spark: this.sparkModel, wonder: this.wonderModel },
+      responseModels: { ...this.responseModels },
       modelCalls: this.sparkCalls + this.wonderCalls,
       callsByModel: { spark: this.sparkCalls, wonder: this.wonderCalls },
       usage: { ...this.usage },
       phasesMs: { ...this.phasesMs },
       totalMs,
       promptHashes: [...this.promptHashes],
+      ...(Object.keys(pricing).length ? { pricing } : {}),
+      ...(cost ? { cost } : {}),
     };
   }
 }
@@ -109,6 +176,8 @@ export function renderRunSummary(s: HumanRunSummary): string {
     "",
     `Models: spark=${m.models.spark}, wonder=${m.models.wonder}; calls=${m.modelCalls} (spark ${m.callsByModel.spark}, wonder ${m.callsByModel.wonder})`,
     `Tokens: prompt=${m.usage.prompt_tokens}, completion=${m.usage.completion_tokens}, total=${m.usage.total_tokens}`,
+    ...(m.cost ? [`Cost: $${m.cost.totalUsd.toFixed(6)} (input $${m.cost.inputUsd.toFixed(6)}, output $${m.cost.outputUsd.toFixed(6)})`] : []),
+    ...(m.responseModels.spark || m.responseModels.wonder ? [`Response models: spark=${m.responseModels.spark ?? "(none reported)"}, wonder=${m.responseModels.wonder ?? "(none reported)"}`] : []),
     `Phases: ${Object.entries(m.phasesMs).map(([phase, duration]) => `${phase}=${ms(duration)}`).join(", ")}, total=${ms(m.totalMs)}`,
     `Prompt hashes: ${m.promptHashes.length ? m.promptHashes.join(", ") : "(none)"}`,
     "",

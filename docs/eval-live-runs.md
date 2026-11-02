@@ -21,3 +21,7 @@ Run at 2026-11-01T00:47:57.201Z with product calls to https://api.meta.ai/v1 (to
 | convention-registered | 1 | 1 | 0 | 100.0% | 100.0% | accepted | accepted | yes | 2 | 6640 | 28.4s |
 | convention-unregistered | 1 | 0 | 1 | 100.0% | 100.0% | reviewed | reviewed | yes | 2 | 7252 | 22.4s |
 | **corpus** | 12 | 8 | 4 | 100.0% | 88.9% | — | — | 9/10 | 20 | 72746 | 249.5s |
+
+## 2026-11-02 — LES-54 env-acceptance row (not a corpus run)
+
+`eval/run-live.ts` now resolves both roles through the provider factory (`LESSCODE_SPARK_MODEL` / `LESSCODE_WONDER_MODEL`, shared `LESSCODE_API_BASE_URL`, or `.lesscode.json`). Acceptance check: one live call with `LESSCODE_API_BASE_URL=https://openrouter.ai/api/v1` set — the request reached OpenRouter and was rejected `401 Missing Authentication header` because the only key available in this environment is a Meta key, which is the auditable provider response (the gateway, not the client, refused it). The same client against the default Meta endpoint returned `response.model: muse-spark-1.3`, recorded in the manifest as `responseModels.spark` alongside derived `cost`. No corpus row is appended: a full live corpus run needs a key for the gateway under test.
