@@ -1,5 +1,6 @@
 import type { FetchLike, ModelClient, ModelRole, ProviderConfig } from "./types.js";
 import { loadLesscodeConfig, type LesscodeConfig } from "./configFile.js";
+import { loadTrustedPolicy, resolveFromTrustedPolicy, type TrustedPolicy } from "./policy.js";
 
 export const DEFAULT_API_BASE_URL = "https://api.meta.ai/v1";
 export const META_API_BASE = DEFAULT_API_BASE_URL;
@@ -49,8 +50,12 @@ function pick(env: NodeJS.ProcessEnv, names: string[], warn?: (msg: string) => v
 
 export interface ResolveProviderOptions {
   warn?: (msg: string) => void;
-  /** Repo root (or any dir inside it) to search upward for `.lesscode.json`. */
+  /** Repo root to search for `.lesscode.json` — only use with trusted checkouts. */
   cwd?: string;
+  /** When true, cwd is treated as trusted (operator-owned). Fetched PR checkouts must not set this. */
+  trusted?: boolean;
+  /** Operator-owned trusted policy; when present file `providers` are ignored and aliases must exist in it. */
+  trustedPolicy?: TrustedPolicy | null;
   /** Explicit config; beats env candidate which beats file. Null disables file layer. */
   explicit?: Partial<ProviderConfig> & { provider?: string };
   /** Pre-loaded file config (mainly tests); `cwd` search is skipped. */
@@ -59,11 +64,11 @@ export interface ResolveProviderOptions {
 
 /**
  * Resolution: explicit arg > LESSCODE_* env (incl. deprecated META_*)
- * > `.lesscode.json` file > hardcoded defaults.
- * File layer: models[role] selects a named provider (baseUrl +
- * apiKeyEnv -> env lookup) and model. Env always overrides the file,
- * so a committed file can pin providers without env mutation, while
- * operators can still override per-run. Secrets only via env indirection.
+ * > operator trusted policy > `.lesscode.json` file > hardcoded defaults.
+ * File `providers` (baseUrl + apiKeyEnv) apply only when `trusted` is true
+ * (operator-owned cwd). Untrusted checkouts may request an alias+model
+ * when a trusted policy is present; they cannot choose endpoint or credential env.
+ * Env always overrides the file. Secrets only via env indirection.
  */
 export function resolveProviderConfig(
   role: ModelRole = "spark",
@@ -72,9 +77,39 @@ export function resolveProviderConfig(
 ): ProviderConfig {
   const warn = opts?.warn;
   const roleUpper = role.toUpperCase() as "SPARK" | "WONDER";
+  if (opts?.explicit?.baseUrl && opts?.explicit?.apiKey) {
+    return {
+      baseUrl: opts.explicit.baseUrl.replace(/\/+$/, ""),
+      apiKey: opts.explicit.apiKey,
+      model: opts.explicit.model ?? pick(env, [`LESSCODE_${roleUpper}_MODEL`, "LESSCODE_MODEL", "META_MODEL"], warn) ?? DEFAULT_MODELS[role],
+      ...(opts.explicit.provider ? { provider: opts.explicit.provider } : {}),
+    };
+  }
+  const trustedPolicy = opts?.trustedPolicy !== undefined ? opts.trustedPolicy : loadTrustedPolicy(env);
+  const trusted = opts?.trusted === true;
   const file: LesscodeConfig | null = opts && "fileConfig" in opts ? (opts.fileConfig ?? null)
-    : opts?.cwd ? loadLesscodeConfig(opts.cwd).config : null;
-  const ref = file?.models?.[role];
+    : opts?.cwd && (trusted || trustedPolicy) ? loadLesscodeConfig(opts.cwd).config : null;
+  // Policy path: checkout may only request alias+model, never endpoint/credential.
+  if (trustedPolicy) {
+    const fileRef = file?.models?.[role];
+    if (fileRef) {
+      const policyProvider = trustedPolicy.providers[fileRef.provider];
+      if (!policyProvider) throw new Error(`.lesscode.json: models.${role}.provider "${fileRef.provider}" is not in trusted policy`);
+      if (policyProvider.allowedModels && !policyProvider.allowedModels.includes(fileRef.model)) throw new Error(`model "${fileRef.model}" not allowed for provider "${fileRef.provider}"`);
+      const apiKey = env[policyProvider.apiKeyEnv]?.trim();
+      if (!apiKey) throw new Error(`trusted provider "${fileRef.provider}" missing env ${policyProvider.apiKeyEnv}`);
+      return {
+        baseUrl: policyProvider.baseUrl.replace(/\/+$/, ""),
+        apiKey,
+        model: fileRef.model,
+        provider: fileRef.provider,
+        ...(trusted && file?.pricing ? { pricing: file.pricing } : {}),
+      };
+    }
+    if (trustedPolicy.models?.[role]) return resolveFromTrustedPolicy(role, trustedPolicy, env);
+  }
+  const useFileProviders = trusted || Boolean(opts && "fileConfig" in opts);
+  const ref = useFileProviders ? file?.models?.[role] : undefined;
   const named = ref ? file?.providers?.[ref.provider] : undefined;
   if (ref && !named) throw new Error(`.lesscode.json: models.${role}.provider "${ref.provider}" is not defined in providers`);
   const fileKey = named ? env[named.apiKeyEnv]?.trim() : undefined;
@@ -110,11 +145,11 @@ export function resolveProviderConfig(
   };
 }
 
-/** True when a model API key is configured (used by the run guard). */
-export function modelEnvAvailable(env: NodeJS.ProcessEnv = process.env, cwd?: string): boolean {
+/** True when a model API key is configured (used by the run guard). Untrusted cwd is never scanned. */
+export function modelEnvAvailable(env: NodeJS.ProcessEnv = process.env, cwd?: string, trusted = false): boolean {
   if (env.LESSCODE_SPARK_API_KEY?.trim() || env.LESSCODE_WONDER_API_KEY?.trim() || env.LESSCODE_API_KEY?.trim() ||
     env.META_API_KEY?.trim() || env.MODEL_API_KEY?.trim() || env.META_AI_API_KEY?.trim()) return true;
-  if (!cwd) return false;
+  if (!cwd || !trusted) return false;
   try {
     const { config } = loadLesscodeConfig(cwd);
     return Object.values(config?.providers ?? {}).some((p) => env[p.apiKeyEnv]?.trim());
@@ -129,6 +164,8 @@ export function isTransientStatus(status: number): boolean {
 export interface CreateModelClientOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  trusted?: boolean;
+  trustedPolicy?: TrustedPolicy | null;
   config?: ProviderConfig;
   fetchFn?: FetchLike;
   timeoutMs?: number;
@@ -139,7 +176,7 @@ export interface CreateModelClientOptions {
 }
 
 export function createModelClient(role: ModelRole = "spark", opts?: CreateModelClientOptions): ModelClient {
-  const config = opts?.config ?? resolveProviderConfig(role, opts?.env, { warn: opts?.warn, ...(opts?.cwd ? { cwd: opts.cwd } : {}) });
+  const config = opts?.config ?? resolveProviderConfig(role, opts?.env, { warn: opts?.warn, trustedPolicy: opts?.trustedPolicy, ...(opts?.cwd ? { cwd: opts.cwd, trusted: opts.trusted === true } : {}) });
   const fetchFn: FetchLike =
     opts?.fetchFn ??
     (async (url, init) => {
