@@ -1,5 +1,6 @@
 import { createDockerExecutor } from "../execution/index.js";
 import { createModelClient } from "../provider/factory.js";
+import { loadTrustedPolicy } from "../provider/policy.js";
 import { createGithubApi, runGithubPrReview, type GithubApi } from "../pr/github.js";
 import type { HostedReviewRunner } from "./server.js";
 
@@ -22,8 +23,10 @@ export function createHostedRunner(config: HostedRunnerConfig): HostedReviewRunn
   if (!config.githubToken || !apiKey || !config.image.trim()) throw new Error("hosted runner requires GitHub credentials, model credentials, and an explicit Docker image");
   const remote = createGithubApi({ token: config.githubToken });
   const providerEnv: NodeJS.ProcessEnv = { ...process.env, ...config.providerEnv, LESSCODE_API_KEY: apiKey };
-  const sparkClient = createModelClient("spark", { env: providerEnv });
-  const wonderClient = createModelClient("wonder", { env: providerEnv });
+  // Hosted checkouts are untrusted: resolve from operator env/policy only, never checkout cwd.
+  const trustedPolicy = loadTrustedPolicy(providerEnv);
+  const sparkClient = createModelClient("spark", { env: providerEnv, trustedPolicy });
+  const wonderClient = createModelClient("wonder", { env: providerEnv, trustedPolicy });
   return async (request, signal) => {
     const executor = createDockerExecutor({ image: config.image });
     const abort = () => { void executor.dispose(); };
