@@ -85,15 +85,23 @@ export async function startStdio() {
 }
 
 // Streamable HTTP via mcp-proxy pattern: single POST endpoint, Mcp-Protocol-Version header, no session-id
+const MAX_BODY = 1_000_000;
 export function createHttpHandler() {
   return async (req: any, res: any) => {
+    // optional bearer auth if LESSCODE_MCP_TOKEN set
+    const token = process.env.LESSCODE_MCP_TOKEN;
+    if (token) {
+      const auth = req.headers.authorization || "";
+      if (auth !== `Bearer ${token}`) { res.writeHead(401).end("Unauthorized"); return; }
+    }
     // require protocol version header
     if (!req.headers["mcp-protocol-version"] && !req.headers["Mcp-Protocol-Version"]) {
       res.writeHead(400).end("Missing Mcp-Protocol-Version");
       return;
     }
     let body = "";
-    for await (const c of req) body += c;
+    let size = 0;
+    for await (const c of req) { body += c; size += Buffer.byteLength(c); if (size > MAX_BODY) { res.writeHead(413).end("Payload too large"); return; } }
     const msg = JSON.parse(body || "{}");
     const result = await handleRequest(msg);
     const resolved = await result;
