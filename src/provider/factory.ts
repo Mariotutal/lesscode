@@ -1,4 +1,5 @@
 import type { FetchLike, ModelClient, ModelRole, ProviderConfig } from "./types.js";
+import { loadLesscodeConfig, type LesscodeConfig } from "./configFile.js";
 
 export const DEFAULT_API_BASE_URL = "https://api.meta.ai/v1";
 export const META_API_BASE = DEFAULT_API_BASE_URL;
@@ -46,40 +47,78 @@ function pick(env: NodeJS.ProcessEnv, names: string[], warn?: (msg: string) => v
   return undefined;
 }
 
+export interface ResolveProviderOptions {
+  warn?: (msg: string) => void;
+  /** Repo root (or any dir inside it) to search upward for `.lesscode.json`. */
+  cwd?: string;
+  /** Explicit config; beats env candidate which beats file. Null disables file layer. */
+  explicit?: Partial<ProviderConfig> & { provider?: string };
+  /** Pre-loaded file config (mainly tests); `cwd` search is skipped. */
+  fileConfig?: LesscodeConfig | null;
+}
+
+/**
+ * Resolution: explicit arg > LESSCODE_* env (incl. deprecated META_*)
+ * > `.lesscode.json` file > hardcoded defaults.
+ * File layer: models[role] selects a named provider (baseUrl +
+ * apiKeyEnv -> env lookup) and model. Env always overrides the file,
+ * so a committed file can pin providers without env mutation, while
+ * operators can still override per-run. Secrets only via env indirection.
+ */
 export function resolveProviderConfig(
   role: ModelRole = "spark",
   env: NodeJS.ProcessEnv = process.env,
-  opts?: { warn?: (msg: string) => void },
+  opts?: ResolveProviderOptions,
 ): ProviderConfig {
   const warn = opts?.warn;
   const roleUpper = role.toUpperCase() as "SPARK" | "WONDER";
+  const file: LesscodeConfig | null = opts && "fileConfig" in opts ? (opts.fileConfig ?? null)
+    : opts?.cwd ? loadLesscodeConfig(opts.cwd).config : null;
+  const ref = file?.models?.[role];
+  const named = ref ? file?.providers?.[ref.provider] : undefined;
+  if (ref && !named) throw new Error(`.lesscode.json: models.${role}.provider "${ref.provider}" is not defined in providers`);
+  const fileKey = named ? env[named.apiKeyEnv]?.trim() : undefined;
+  // Canonical LESSCODE_* beats the file; the file's provider-specific
+  // key indirection beats the deprecated global META_*/MODEL_* aliases.
+  // Otherwise an unrelated legacy key for the *other* provider would
+  // silently hijack a provider pinned by the committed file.
   const baseUrlRaw =
-    pick(env, ["LESSCODE_API_BASE_URL", `LESSCODE_${roleUpper}_API_BASE_URL`, "META_API_BASE_URL"], warn) ??
-    DEFAULT_API_BASE_URL;
+    opts?.explicit?.baseUrl ??
+    pick(env, ["LESSCODE_API_BASE_URL", `LESSCODE_${roleUpper}_API_BASE_URL`], warn) ??
+    named?.baseUrl ??
+    pick(env, ["META_API_BASE_URL"], warn) ?? DEFAULT_API_BASE_URL;
   const apiKey =
-    pick(env, [`LESSCODE_${roleUpper}_API_KEY`, "LESSCODE_API_KEY", "META_API_KEY", "MODEL_API_KEY", "META_AI_API_KEY"], warn) ?? "";
+    opts?.explicit?.apiKey ??
+    pick(env, [`LESSCODE_${roleUpper}_API_KEY`, "LESSCODE_API_KEY"], warn) ??
+    (fileKey || undefined) ??
+    pick(env, ["META_API_KEY", "MODEL_API_KEY", "META_AI_API_KEY"], warn) ?? "";
   if (!apiKey) {
-    throw new Error(
-      "no model API key: set LESSCODE_API_KEY (or the deprecated META_API_KEY) for the model provider",
-    );
+    throw new Error(named
+      ? `no model API key: .lesscode.json provider "${ref!.provider}" names env var ${named.apiKeyEnv}, which is unset (or set LESSCODE_API_KEY)`
+      : "no model API key: set LESSCODE_API_KEY (or the deprecated META_API_KEY) for the model provider");
   }
   const model =
-    pick(env, [`LESSCODE_${roleUpper}_MODEL`, "LESSCODE_MODEL", "META_MODEL"], warn) ?? DEFAULT_MODELS[role];
-  const provider = pick(env, ["LESSCODE_PROVIDER"], warn);
+    opts?.explicit?.model ??
+    pick(env, [`LESSCODE_${roleUpper}_MODEL`, "LESSCODE_MODEL", "META_MODEL"], warn) ?? ref?.model ?? DEFAULT_MODELS[role];
+  const provider = opts?.explicit?.provider ?? pick(env, ["LESSCODE_PROVIDER"], warn) ?? ref?.provider;
   return {
     baseUrl: baseUrlRaw.replace(/\/+$/, ""),
     apiKey,
     model,
     ...(provider ? { provider } : {}),
+    ...(file?.pricing ? { pricing: file.pricing } : {}),
   };
 }
 
 /** True when a model API key is configured (used by the run guard). */
-export function modelEnvAvailable(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(
-    env.LESSCODE_SPARK_API_KEY?.trim() || env.LESSCODE_WONDER_API_KEY?.trim() || env.LESSCODE_API_KEY?.trim() ||
-    env.META_API_KEY?.trim() || env.MODEL_API_KEY?.trim() || env.META_AI_API_KEY?.trim(),
-  );
+export function modelEnvAvailable(env: NodeJS.ProcessEnv = process.env, cwd?: string): boolean {
+  if (env.LESSCODE_SPARK_API_KEY?.trim() || env.LESSCODE_WONDER_API_KEY?.trim() || env.LESSCODE_API_KEY?.trim() ||
+    env.META_API_KEY?.trim() || env.MODEL_API_KEY?.trim() || env.META_AI_API_KEY?.trim()) return true;
+  if (!cwd) return false;
+  try {
+    const { config } = loadLesscodeConfig(cwd);
+    return Object.values(config?.providers ?? {}).some((p) => env[p.apiKeyEnv]?.trim());
+  } catch { return false; }
 }
 
 /** Transient statuses worth retrying: rate limit and server errors. */
@@ -89,6 +128,7 @@ export function isTransientStatus(status: number): boolean {
 
 export interface CreateModelClientOptions {
   env?: NodeJS.ProcessEnv;
+  cwd?: string;
   config?: ProviderConfig;
   fetchFn?: FetchLike;
   timeoutMs?: number;
@@ -99,7 +139,7 @@ export interface CreateModelClientOptions {
 }
 
 export function createModelClient(role: ModelRole = "spark", opts?: CreateModelClientOptions): ModelClient {
-  const config = opts?.config ?? resolveProviderConfig(role, opts?.env, { warn: opts?.warn });
+  const config = opts?.config ?? resolveProviderConfig(role, opts?.env, { warn: opts?.warn, ...(opts?.cwd ? { cwd: opts.cwd } : {}) });
   const fetchFn: FetchLike =
     opts?.fetchFn ??
     (async (url, init) => {

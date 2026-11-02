@@ -118,7 +118,7 @@ export async function planOnce(opts: {
   baseRef?: string;
   client?: GuestClient;
 }): Promise<PlanResult> {
-  const client = opts.client ?? createModelClient("wonder");
+  const client = opts.client ?? createModelClient("wonder", { cwd: opts.checkoutDir });
   const sources = readCheckoutSources(opts.checkoutDir, opts.files);
   let diffText = "";
   if (opts.baseRef && opts.changedFiles?.length) {
