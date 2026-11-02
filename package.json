@@ -45,5 +45,8 @@
     ".": "./dist/engine/index.js",
     "./execution": "./dist/execution/index.js",
     "./source": "./dist/source/index.js"
+  },
+  "bin": {
+    "lesscode": "bin/lesscode"
   }
 }
