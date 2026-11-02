@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "../classify/client.js";
+import type { ToolDefinition } from "../provider/types.js";
 import { simplify, type SimplifyOptions, type SimplifyResult } from "../simplify/simplify.js";
 import { simplifyToolArgumentsSchema } from "./schema.js";
 

@@ -1,4 +1,5 @@
-import { createGuestClient, type GuestClient, type ToolDefinition } from "../classify/client.js";
+import { createModelClient, WONDER_MODEL } from "../provider/factory.js";
+import type { GuestClient, ToolDefinition } from "../provider/types.js";
 import type { Finding } from "../classify/schema.js";
 import type { ScopeCreepFinding } from "../classify/scopeCreep.js";
 import { assertFitsWindow, readCheckoutSources } from "../classify/checkout.js";
@@ -7,8 +8,8 @@ import { planOutputSchema, wonderOutputSchema, type PlannedEdit, type ReviewNote
 import { hashPrompt } from "../manifest.js";
 import { buildSymbolGraph, importersOf } from "../gate/symbolGraph.js";
 
-export const WONDER_MODEL = "muse-wonder-1.0";
-export const PLAN_TOOL = "propose_surgical_patch";
+export { WONDER_MODEL };
+const PLAN_TOOL = "propose_surgical_patch";
 
 const PLAN_TOOL_DEF: ToolDefinition = {
   type: "function",
@@ -117,7 +118,7 @@ export async function planOnce(opts: {
   baseRef?: string;
   client?: GuestClient;
 }): Promise<PlanResult> {
-  const client = opts.client ?? createGuestClient({ env: { ...process.env, META_MODEL: WONDER_MODEL } });
+  const client = opts.client ?? createModelClient("wonder");
   const sources = readCheckoutSources(opts.checkoutDir, opts.files);
   let diffText = "";
   if (opts.baseRef && opts.changedFiles?.length) {

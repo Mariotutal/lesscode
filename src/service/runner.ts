@@ -1,12 +1,16 @@
-import { createGuestClient, SPARK_MODEL } from "../classify/client.js";
 import { createDockerExecutor } from "../execution/index.js";
-import { WONDER_MODEL } from "../plan/plan.js";
+import { createModelClient } from "../provider/factory.js";
 import { createGithubApi, runGithubPrReview, type GithubApi } from "../pr/github.js";
 import type { HostedReviewRunner } from "./server.js";
 
 export interface HostedRunnerConfig {
   githubToken: string;
-  metaApiKey: string;
+  /** Canonical model API key (any OpenAI-compat provider). */
+  apiKey?: string;
+  /** @deprecated alias for apiKey */
+  metaApiKey?: string;
+  /** Optional provider env overrides (baseUrl/models). */
+  providerEnv?: NodeJS.ProcessEnv;
   image: string;
   /** Publication is an operator policy, never an untrusted HTTP request field. */
   publish?: boolean;
@@ -14,10 +18,12 @@ export interface HostedRunnerConfig {
 
 /** The control process owns remote credentials. Every repository executable uses a per-job isolated executor. */
 export function createHostedRunner(config: HostedRunnerConfig): HostedReviewRunner {
-  if (!config.githubToken || !config.metaApiKey || !config.image.trim()) throw new Error("hosted runner requires GitHub credentials, Meta credentials, and an explicit Docker image");
+  const apiKey = config.apiKey ?? config.metaApiKey;
+  if (!config.githubToken || !apiKey || !config.image.trim()) throw new Error("hosted runner requires GitHub credentials, model credentials, and an explicit Docker image");
   const remote = createGithubApi({ token: config.githubToken });
-  const sparkClient = createGuestClient({ env: { META_API_KEY: config.metaApiKey, META_MODEL: SPARK_MODEL } });
-  const wonderClient = createGuestClient({ env: { META_API_KEY: config.metaApiKey, META_MODEL: WONDER_MODEL } });
+  const providerEnv: NodeJS.ProcessEnv = { ...process.env, ...config.providerEnv, LESSCODE_API_KEY: apiKey };
+  const sparkClient = createModelClient("spark", { env: providerEnv });
+  const wonderClient = createModelClient("wonder", { env: providerEnv });
   return async (request, signal) => {
     const executor = createDockerExecutor({ image: config.image });
     const abort = () => { void executor.dispose(); };

@@ -1,5 +1,5 @@
 import { simplify } from "../simplify/simplify.js";
-import type { GuestClient } from "../classify/client.js";
+import type { GuestClient } from "../provider/types.js";
 
 /** Legacy command adapter. There is only one engine and it never edits the caller checkout. */
 export async function runPipeline(opts: { checkoutDir: string; baseRef: string; gateBaseRef: string; intentFiles: string[]; relatedTests: string[]; sparkClient?: GuestClient; wonderClient?: GuestClient }) {

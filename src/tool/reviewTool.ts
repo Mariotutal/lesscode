@@ -2,7 +2,7 @@ import { runReview } from "../engine/run.js";
 import type { ReviewRequest, RunRecord } from "../engine/types.js";
 import { simplifyToolArgumentsSchema } from "./schema.js";
 import { SIMPLIFY_TOOL_DEF } from "./tool.js";
-import type { ToolDefinition } from "../classify/client.js";
+import type { ToolDefinition } from "../provider/types.js";
 
 export const REVIEW_TOOL_DEF: ToolDefinition = {
   type: "function",
