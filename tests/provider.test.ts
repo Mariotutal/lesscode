@@ -21,6 +21,18 @@ describe("provider factory (LES-52)", () => {
     }, { warn: () => {} });
     expect(cfg).toMatchObject({ apiKey: "wk", baseUrl: "https://openrouter.ai/api/v1", model: "x/wonder" });
   });
+  it("role-specific endpoints override shared endpoints for both roles", () => {
+    const env = {
+      LESSCODE_API_KEY: "shared-key",
+      LESSCODE_SPARK_API_KEY: "spark-key",
+      LESSCODE_WONDER_API_KEY: "wonder-key",
+      LESSCODE_API_BASE_URL: "https://shared.example/v1/",
+      LESSCODE_SPARK_API_BASE_URL: "https://spark.example/v1/",
+      LESSCODE_WONDER_API_BASE_URL: "https://wonder.example/v1/",
+    };
+    expect(resolveProviderConfig("spark", env)).toMatchObject({ baseUrl: "https://spark.example/v1", apiKey: "spark-key" });
+    expect(resolveProviderConfig("wonder", env)).toMatchObject({ baseUrl: "https://wonder.example/v1", apiKey: "wonder-key" });
+  });
   it("deprecated META_* aliases still work and warn", () => {
     resetDeprecationWarnings();
     const warns: string[] = [];
@@ -69,12 +81,13 @@ describe(".lesscode.json config file (LES-53)", () => {
     expect(w.pricing?.["anthropic/claude-sonnet-4"]).toEqual({ inputPerMtok: 3, outputPerMtok: 15 });
     expect(modelEnvAvailable(env, dir, true)).toBe(true);
   });
-  it("found upward from a nested dir; cached until cleared", () => {
+  it("found upward from a nested dir and observes edits on the next load", () => {
     const nested = join(dir, "a/b"); mkdirSync(nested, { recursive: true });
     expect(findLesscodeConfigPath(nested)).toBe(join(dir, ".lesscode.json"));
     expect(loadLesscodeConfig(nested).config?.version).toBe(1);
-    writeFileSync(join(dir, ".lesscode.json"), JSON.stringify({ ...cfg, version: 1 }));
-    expect(loadLesscodeConfig(nested).config).toBe(loadLesscodeConfig(nested).config); // same cached object
+    const changed = { ...cfg, pricing: { "anthropic/claude-sonnet-4": { inputPerMtok: 9, outputPerMtok: 15 } } };
+    writeFileSync(join(dir, ".lesscode.json"), JSON.stringify(changed));
+    expect(loadLesscodeConfig(nested).config?.pricing?.["anthropic/claude-sonnet-4"]?.inputPerMtok).toBe(9);
   });
   it("env overrides file; explicit arg overrides env", () => {
     const env = { META_API_KEY: "mk", OPENROUTER_API_KEY: "ok", LESSCODE_WONDER_MODEL: "env/wonder", LESSCODE_API_BASE_URL: "https://env.example/v1" };
@@ -169,6 +182,12 @@ describe("trusted provider policy (LES-58)", () => {
     const env = { OPENAI_API_KEY: "sk", GITHUB_TOKEN: "ghs_exfil" };
     expect(resolveProviderConfig("spark", env, { cwd: dir, trusted: false, trustedPolicy: policy }))
       .toMatchObject({ provider: "openai", apiKey: "sk", baseUrl: "https://api.openai.com/v1", model: "gpt-4o" });
+  });
+  it("trusted policy reloads from the current environment on each load", () => {
+    const env = { LESSCODE_TRUSTED_POLICY: JSON.stringify({ version: 1, providers: { one: { baseUrl: "https://one.example/v1", apiKeyEnv: "K", allowedModels: ["m1"] } }, models: { spark: { provider: "one", model: "m1" } } }), K: "key" };
+    expect(loadTrustedPolicy(env)?.models?.spark?.model).toBe("m1");
+    env.LESSCODE_TRUSTED_POLICY = JSON.stringify({ version: 1, providers: { two: { baseUrl: "https://two.example/v1", apiKeyEnv: "K", allowedModels: ["m2"] } }, models: { spark: { provider: "two", model: "m2" } } });
+    expect(loadTrustedPolicy(env)?.models?.spark?.model).toBe("m2");
   });
 
   it("rejects unknown alias, disallowed model, http URL, and credentials in URL", () => {

@@ -36,13 +36,11 @@ export function hashPolicy(policy: TrustedPolicy): string {
   return createHash("sha256").update(JSON.stringify(policy)).digest("hex").slice(0, 16);
 }
 
-let cachedTrustedPolicy: TrustedPolicy | null | undefined = undefined;
-export function clearTrustedPolicyCache(): void {
-  cachedTrustedPolicy = undefined;
-}
+/** Backwards-compatible no-op; policy snapshots are owned by each run. */
+export function clearTrustedPolicyCache(): void { }
 
-export function loadTrustedPolicy(env: NodeJS.ProcessEnv = process.env, opts?: { noCache?: boolean }): TrustedPolicy | null {
-  if (!opts?.noCache && cachedTrustedPolicy !== undefined) return cachedTrustedPolicy;
+export function loadTrustedPolicy(env: NodeJS.ProcessEnv = process.env, _opts?: { noCache?: boolean }): TrustedPolicy | null {
+  void _opts;
   const raw = env.LESSCODE_TRUSTED_POLICY?.trim() || env.LESSCODE_TRUSTED_POLICY_FILE?.trim();
   let policy: TrustedPolicy | null = null;
   if (raw) {
@@ -69,7 +67,6 @@ export function loadTrustedPolicy(env: NodeJS.ProcessEnv = process.env, opts?: {
       if (prov.allowedModels && prov.allowedModels.length === 0) throw new Error(`provider ${name}: allowedModels must be non-empty if set`);
     }
   }
-  if (!opts?.noCache) cachedTrustedPolicy = policy;
   return policy;
 }
 

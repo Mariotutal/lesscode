@@ -88,18 +88,16 @@ export function findLesscodeConfigPath(startDir: string): string | null {
   }
 }
 
-const cache = new Map<string, LoadedLesscodeConfig>();
-/** Test/ops hook: drop memoized config loads (e.g. after writing a new file). */
-export function clearLesscodeConfigCache(): void { cache.clear(); }
+/** Backwards-compatible no-op; config loads are intentionally uncached. */
+export function clearLesscodeConfigCache(): void { }
 
 /**
- * Load and zod-validate `.lesscode.json` for `startDir` (cached per
- * resolved start dir). Missing file is not an error ({path:null}).
+ * Load and zod-validate `.lesscode.json` for `startDir`. Missing file is not
+ * an error ({path:null}); each call reads current filesystem state.
  * Malformed JSON / schema violations throw a secret-free error.
  */
-export function loadLesscodeConfig(startDir: string, opts?: { noCache?: boolean }): LoadedLesscodeConfig {
-  const key = startDir;
-  if (!opts?.noCache) { const hit = cache.get(key); if (hit) return hit; }
+export function loadLesscodeConfig(startDir: string, _opts?: { noCache?: boolean }): LoadedLesscodeConfig {
+  void _opts;
   const path = findLesscodeConfigPath(startDir);
   let loaded: LoadedLesscodeConfig = { path, config: null };
   if (path) {
@@ -117,6 +115,5 @@ export function loadLesscodeConfig(startDir: string, opts?: { noCache?: boolean 
     }
     loaded = { path, config: parsed.data };
   }
-  if (!opts?.noCache) cache.set(key, loaded);
   return loaded;
 }
