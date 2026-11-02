@@ -49,8 +49,10 @@ function pick(env: NodeJS.ProcessEnv, names: string[], warn?: (msg: string) => v
 
 export interface ResolveProviderOptions {
   warn?: (msg: string) => void;
-  /** Repo root (or any dir inside it) to search upward for `.lesscode.json`. */
+  /** Repo root to search for `.lesscode.json` — only use with trusted checkouts. */
   cwd?: string;
+  /** When true, cwd is treated as trusted (operator-owned). Fetched PR checkouts must not set this. */
+  trusted?: boolean;
   /** Explicit config; beats env candidate which beats file. Null disables file layer. */
   explicit?: Partial<ProviderConfig> & { provider?: string };
   /** Pre-loaded file config (mainly tests); `cwd` search is skipped. */
@@ -73,7 +75,7 @@ export function resolveProviderConfig(
   const warn = opts?.warn;
   const roleUpper = role.toUpperCase() as "SPARK" | "WONDER";
   const file: LesscodeConfig | null = opts && "fileConfig" in opts ? (opts.fileConfig ?? null)
-    : opts?.cwd ? loadLesscodeConfig(opts.cwd).config : null;
+    : opts?.cwd && opts?.trusted ? loadLesscodeConfig(opts.cwd).config : null;
   const ref = file?.models?.[role];
   const named = ref ? file?.providers?.[ref.provider] : undefined;
   if (ref && !named) throw new Error(`.lesscode.json: models.${role}.provider "${ref.provider}" is not defined in providers`);
