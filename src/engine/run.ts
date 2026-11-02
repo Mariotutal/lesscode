@@ -8,7 +8,7 @@ import { findTarget, parse } from "../classify/target.js";
 import type { Finding } from "../classify/schema.js";
 import { createTrustedLocalExecutor, type RepositoryExecutor } from "../execution/index.js";
 import { evaluateCheapGate, evaluateCommandGate, type GateResult } from "../gate/gate.js";
-import { addUsage, hashPrompt, ManifestBuilder, renderRunSummary } from "../manifest.js";
+import { hashPrompt, ManifestBuilder, renderRunSummary } from "../manifest.js";
 import { prepareEdit } from "../plan/apply.js";
 import { planOnce, type AnyFinding } from "../plan/plan.js";
 import type { PlannedEdit, ReviewNoteItem } from "../plan/schema.js";
@@ -21,12 +21,13 @@ const reason = (code: DecisionReason["code"], stage: DecisionReason["stage"], de
 
 function instrument(client: GuestClient, role: "spark" | "wonder", manifest: ManifestBuilder, signal?: AbortSignal): GuestClient {
   if (role === "spark") manifest.sparkModel = client.config.model; else manifest.wonderModel = client.config.model;
+  manifest.setPricing(role, client.config.pricing);
   return { config: client.config, async chat(request) {
     signal?.throwIfAborted();
     if (role === "spark") manifest.sparkCalls++; else manifest.wonderCalls++;
     manifest.promptHashes.push(hashPrompt(request.messages));
     const response = await client.chat({ ...request, signal });
-    addUsage(manifest.usage, response.usage);
+    manifest.recordResponse(role, response.usage, response.model);
     signal?.throwIfAborted();
     return response;
   } };

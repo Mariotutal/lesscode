@@ -29,4 +29,15 @@ A symbol other files still reference is not inlined or deleted. Tests are not de
 
 ## Run it
 
-See [docs/run.md](docs/run.md) for running a local checkout, reviewing a GitHub pull request, running the hosted service, and running the tests. The published site is at https://mariotutal.github.io/lesscode/.
+See [docs/run.md](docs/run.md) for running a local checkout, reviewing a GitHub pull request, running the hosted service, and running the tests. Provider and gateway examples (OpenRouter, Portkey, LiteLLM, Baseten) are in [docs/providers.md](docs/providers.md). The published site is at https://mariotutal.github.io/lesscode/.
+
+## Migrating from META_* to LESSCODE_*
+
+| Old | New |
+|---|---|
+| `META_API_KEY` / `MODEL_API_KEY` / `META_AI_API_KEY` | `LESSCODE_API_KEY` |
+| `META_API_BASE_URL` | `LESSCODE_API_BASE_URL` |
+| `META_MODEL` | `LESSCODE_MODEL`, or per role `LESSCODE_SPARK_MODEL` / `LESSCODE_WONDER_MODEL` |
+| — | `LESSCODE_SPARK_API_KEY` / `LESSCODE_WONDER_API_KEY` (per-role key override) |
+
+The old names still work and print a one-time deprecation warning. Canonical `LESSCODE_*` wins when both are set.

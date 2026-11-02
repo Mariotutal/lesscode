@@ -42,7 +42,7 @@ export interface RunAudit {
   registry: string[];
   unknownConventions: string[];
   refusedConventions: { convention: string; file: string; citations: ReviewNoteItem["citations"]; rationale: string }[];
-  plan: { edits: number; skipped: { findingIndex: number; reason: string }[]; model: string; modelCalls: number; usage?: unknown; review: ReviewNoteItem[] };
+  plan: { edits: number; skipped: { findingIndex: number; reason: string }[]; model: string; modelCalls: number; usage?: unknown; review: ReviewNoteItem[]; responseModel?: string };
   reasons: string[];
   tsConfig: { allowJs: boolean; checkJs: boolean };
 }
@@ -55,6 +55,8 @@ export interface RunRecord {
   verdict: "accepted" | "reviewed" | "failed";
   outcome: "patch-ready" | "review-only" | "no-change" | "unverified" | null;
   revision: { headSha: string; baseSha: string; scope: "declared" | "inferred" } | null;
+  /** Auditable model ids the providers returned (`response.model`), when any call reported one. Derived from the manifest. */
+  responseModels?: { spark?: string; wonder?: string };
   execution: { kind: RepositoryExecutor["kind"]; policyVersion: 1; environmentId?: string };
   findings: AnyFinding[];
   findingIds: string[];

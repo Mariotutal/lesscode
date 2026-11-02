@@ -1,25 +1,30 @@
 #!/usr/bin/env node
 /**
- * Live evaluation run (LES-27): the same corpus as tests/eval.test.ts
- * but with real Spark (muse-spark-1.3) and Wonder (muse-wonder-1.0)
- * clients, tool_choice auto, via review(). Appends a dated section
- * to docs/eval-live-runs.md with the model identifiers so a model
- * change shows up as a diff in the numbers.
+ * Live evaluation run (LES-27, LES-54): the same corpus as
+ * tests/eval.test.ts but with real model clients, tool_choice auto,
+ * via review(). Appends a dated section to docs/eval-live-runs.md
+ * with the model identifiers so a model change shows up as a diff
+ * in the numbers.
  *
- * Usage: MODEL_API_KEY=... npx tsx eval/run-live.ts
+ * Usage: LESSCODE_API_KEY=... npx tsx eval/run-live.ts
+ * Roles resolve through the provider factory: LESSCODE_SPARK_MODEL /
+ * LESSCODE_WONDER_MODEL (shared LESSCODE_MODEL), LESSCODE_API_BASE_URL,
+ * or a committed `.lesscode.json`. Examples:
+ *   LESSCODE_SPARK_MODEL=meta/muse-spark-1.3 LESSCODE_WONDER_MODEL=anthropic/claude-sonnet-4
  */
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createGuestClient, SPARK_MODEL } from "../src/classify/client.js";
-import { WONDER_MODEL } from "../src/plan/plan.js";
+import { createGuestClient } from "../src/classify/client.js";
 import { EVAL_CASES } from "./cases.js";
 import { runCase } from "./run.js";
 import { renderScoreTable, scoreCorpus } from "./score.js";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const spark = createGuestClient();
-const wonder = createGuestClient({ env: { ...process.env, META_MODEL: WONDER_MODEL } });
+const spark = createGuestClient({ role: "spark" });
+const wonder = createGuestClient({ role: "wonder" });
+const sparkModel = spark.config.model;
+const wonderModel = wonder.config.model;
 
 const scores = [];
 for (const c of EVAL_CASES) {
@@ -31,9 +36,9 @@ const corpus = scoreCorpus(scores);
 const date = new Date().toISOString().slice(0, 10);
 const section = [
   "",
-  `## ${date} — spark ${SPARK_MODEL}, wonder ${WONDER_MODEL}`,
+  `## ${date} — spark ${sparkModel}, wonder ${wonderModel}`,
   "",
-  `Run at ${new Date().toISOString()} with product calls to https://api.meta.ai/v1 (tool_choice auto).`,
+  `Run at ${new Date().toISOString()} with product calls to ${spark.config.baseUrl} / ${wonder.config.baseUrl} (tool_choice auto).`,
   "",
   renderScoreTable(corpus),
   "",

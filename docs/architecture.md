@@ -43,6 +43,10 @@ A fetched pull request has no local-process fallback. The runner image is built 
 
 The note is built from the plan after the edits are decided. An item whose citation does not exist is dropped. An item that asked for an edit which was not kept stays in the note as “Not applied,” with the reason, and no longer orders that edit.
 
+## Providers
+
+Both roles speak one OpenAI-compatible contract, implemented in `src/provider/factory.ts`: `POST {baseUrl}/chat/completions` with `model`, `messages`, and — when tools are sent — `tools` plus `tool_choice: "auto"` (never forced). Spark's tool is `report_findings`; Wonder's is `propose_surgical_patch`, which returns the edit plan and the note together in Wonder's single call. Only HTTP `429` and `5xx` are retried (at most twice, exponential backoff); other statuses fail the call, and each attempt has a 5-minute timeout. Resolution is per role: explicit argument > `LESSCODE_*` env (per-role, then shared) > a committed `.lesscode.json` (`providers` + `models`, keys only via `apiKeyEnv`) > deprecated `META_*` / `MODEL_API_KEY` aliases > defaults (`https://api.meta.ai/v1`, `muse-spark-1.3` / `muse-wonder-1.0`). The provider's returned `model` is recorded in the manifest as `responseModels`, and `usage` feeds the derived `cost` (see [Providers and gateways](providers.md)); cost never gates a run.
+
 ## The gate
 
 A patch is accepted when all of these hold:

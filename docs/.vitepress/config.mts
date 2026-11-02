@@ -14,6 +14,7 @@ export default withMermaid(
         { text: 'Home', link: '/' },
         { text: 'Run', link: '/run' },
         { text: 'Architecture', link: '/architecture' },
+        { text: 'Providers', link: '/providers' },
         { text: 'Measurements', link: '/eval-live-runs' },
       ],
       sidebar: [
