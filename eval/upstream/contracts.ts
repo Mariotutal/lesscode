@@ -52,6 +52,8 @@ export function assessRecord(input: unknown, c: UpstreamCase, adapter: Adapter, 
   if (exitCode !== (record.verdict === 'accepted' ? 0 : record.verdict === 'reviewed' ? 1 : 2)) issues.push('adapter exit status mismatch');
   if (receipt.adapter !== adapter || !receipt.completedAt || receipt.attempts < manifest.modelCalls || receipt.attempts > receipt.maxRequests) issues.push('transport invocation evidence inconsistent');
   if (!Object.values(manifest.responseModels).every((model) => receipt.responseModels.includes(model)) || receipt.responseTokens <= 0) issues.push('provider response evidence missing');
+  if (manifest.usage.total_tokens !== receipt.responseTokens || receipt.responseModels.length !== manifest.modelCalls) issues.push('provider usage or response count mismatch');
+  if (Date.parse(receipt.completedAt) < Date.parse(receipt.startedAt)) issues.push('invocation timestamps are out of order');
   if (manifest.promptHashes.length !== manifest.modelCalls || manifest.modelCalls !== manifest.callsByModel.spark + manifest.callsByModel.wonder) issues.push('model call evidence inconsistent');
   if (record.verdict === 'accepted') {
     const artifact = z.object({ patch: z.string().min(1), sha256: z.string(), baseSha: z.string(), headSha: z.string() }).parse(record.artifact);

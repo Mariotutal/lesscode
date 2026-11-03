@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { corpusSchema, assessRecord, type InvocationReceipt } from '../eval/upstream/contracts.js';
 import { boundedFetch } from '../eval/upstream/budget.js';
 
@@ -15,6 +17,15 @@ const record = () => ({ schemaVersion: 1, runId: 'unique-invocation', state: 'co
 });
 
 describe('upstream evaluation evidence', () => {
+  it('refuses live mode without explicit operator credentials instead of loading .env', () => {
+    const result = spawnSync(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../eval/upstream/run.ts', import.meta.url)), '--live'], {
+      env: { PATH: process.env.PATH, LESSCODE_RUNNER_IMAGE: 'not-used:test' }, encoding: 'utf8', timeout: 15_000,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('No .env is loaded');
+    expect(result.stdout).not.toContain('Evidence:');
+  });
   it('rejects placeholder revisions, duplicate cases and untrusted source URLs', () => {
     expect(() => corpusSchema.parse([{ ...c, base: '0'.repeat(40) }])).toThrow();
     expect(() => corpusSchema.parse([c, c])).toThrow();
@@ -27,6 +38,7 @@ describe('upstream evaluation evidence', () => {
     expect(assessRecord(record(), c, 'mcp', 1, receipt()).passed).toBe(false);
     expect(() => assessRecord(record(), c, 'cli', 1, { ...receipt(), attempts: undefined })).toThrow();
     expect(assessRecord(record(), c, 'cli', 1, { ...receipt(), responseModels: ['other'] }).passed).toBe(false);
+    expect(assessRecord(record(), c, 'cli', 1, { ...receipt(), responseTokens: 1 }).passed).toBe(false);
   });
   it('does not reinterpret mismatches or exit codes as success', () => {
     expect(assessRecord(record(), c, 'cli', 0, receipt()).issues).toContain('adapter exit status mismatch');

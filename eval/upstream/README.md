@@ -1,12 +1,17 @@
 # Pinned upstream pilot
 
 This is a new evaluator, separate from the quarantined `live-corpus-30`.
-The initial manifest contains **one actual upstream change**, the
+The initial manifest contains **two actual upstream changes**, including the
 [is-plain-obj performance PR](https://github.com/sindresorhus/is-plain-obj/pull/16).
 The head is `e334e11a580ba92662671e9386ea3b681f7750d2`; its actual parent
 is `c49ab092dcfd9bb5af5409cc3d6a1e5cbe443afe`. The MIT license content
 at both revisions was verified against the committed SHA-256 hash.
 Expected behavior was recorded from source inspection before model use.
+The second case is the [is-number refactor](https://github.com/jonschlinkert/is-number/commit/b0ceb52a380b20221e5be749160aeb13bf3904d0),
+with verified parent `a69ea0bf7292faa5175c97b43de823f698f63ef0` and MIT
+license hash. Its version-comparison benchmark helpers are deliberately
+separate implementations. Its pre-existing benchmark variable-name bug
+is recorded in the expectation rather than called a new regression.
 
 ## Run
 
@@ -18,6 +23,11 @@ local runner image ID. No image is pulled and no `.env` is loaded.
 ```sh
 LESSCODE_RUNNER_IMAGE=lesscode-runner:local npm run eval:upstream -- --baseline
 ```
+
+Use `--case is-number-refactor` to select just that case. Both selected
+and excluded IDs are saved in provenance and the final summary. A pass
+for an explicit selection does not certify excluded cases. An unknown
+case or conflicting `--live --baseline` flags is an error.
 
 Baseline mode makes **no model calls**. It fetches the exact public
 commits without executing repository files on the host, verifies the
@@ -76,10 +86,28 @@ notes and any patch. Every top-level summary keeps
 `modelQualityEstablished: false`; one upstream change cannot establish
 general model quality. There is no claim of 30 evaluated projects.
 
-The upstream revision has no npm lockfile. The runner saves the resolved
+These upstream revisions have no npm lockfiles. The runner saves the resolved
 dependency inventory for each version; dependency installation is not
 fully reproducible. The independent manifest expectations remain
 reviewable hypotheses. The product gate's known uncovered-error-path
 limitation also remains. Expand the corpus with independently reviewed
 source changes and behavior checks rather than copying this answer to
 new project names.
+
+## Observed baseline limitation
+
+The initial is-plain-obj attempt at evaluator commit `1a6f75a` failed
+before model use. Its syntax check and AVA behavior test passed, but its
+older tsd/TypeScript toolchain could not parse the freshly resolved
+dependency type declarations on the Node 22 runner. The saved summary is
+failed, with no adapter records or model calls. This is an environment
+compatibility failure, not a model-quality result. It remains a blocking
+case in the default full-manifest run; no tests or revisions were changed
+to convert it to a pass. A future dependency lock/environment recipe
+must be reviewed and captured explicitly if that historical case is to
+be used for live evaluation.
+
+The first completed live selection and its manual note-quality findings
+are recorded in [observed-runs.md](observed-runs.md). All three real
+adapters passed mechanical checks, but factual errors in the generated
+notes prevented a review-quality sign-off.
