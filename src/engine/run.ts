@@ -69,7 +69,7 @@ function finalizeNote(record: RunRecord, texts: Map<string, string>, changedLine
       if (!outcome) {
         const rejected = record.edits.find((e) => e.findingIndex === item.ordersEditForFinding);
         const detail = rejected?.reason?.detail ?? "no gate-accepted edit was applied for this finding";
-        items.push({ ...item, text: `Not applied: ${detail}`, ordersEditForFinding: undefined });
+        items.push({ ...item, text: `Not applied: ${detail}`, ordersEditForFinding: undefined, claims: [] });
         record.audit.reasons.push(`finding ${item.ordersEditForFinding} kept and produces no patch: ${detail}`);
         continue;
       }

@@ -118,3 +118,6 @@ It records a failed prompt-guidance experiment as well as the remaining
 need for factual claim verification. The diagnostic holdouts can be run
 with `node --import tsx eval/upstream/accuracy.ts --live` using the same
 explicit operator model environment and request bounds.
+
+The subsequent factual-verification implementation and its measured
+controls are documented in [factual-verification-results.md](factual-verification-results.md).

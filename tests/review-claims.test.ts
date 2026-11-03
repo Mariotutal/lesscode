@@ -102,6 +102,12 @@ describe('code-derived factual verification', () => {
     expect(verified.verification?.status).toBe('verified');
     expect(verified.text).toContain('not execution or complete coverage');
   });
+  it('does not certify numeric inputs that JSON would silently change', () => {
+    expect(catalog('assert.equal(f(1e400),true); assert.equal(f(-1e400),true); assert.equal(f(-0),true);', 'test.js')).toEqual([]);
+    const facts = catalog('assert.equal(f(0),true);', 'test.js');
+    expect(facts[0]?.values).toEqual([0]);
+    expect(JSON.parse(JSON.stringify(facts))).toEqual(facts);
+  });
   it('cross-checks bounded traces against real JS on trusted, fixed test programs', () => {
     const programs = [
       'function f(x) { if(typeof (missing)==="number") return missing; return false; }',

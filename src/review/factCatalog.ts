@@ -32,11 +32,14 @@ function moduleBindings(sf: ts.SourceFile): Set<string> {
 }
 function literal(node: ts.Expression): { value: Scalar } | undefined {
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return { value: node.text };
-  if (ts.isNumericLiteral(node)) return { value: Number(node.text) };
+  if (ts.isNumericLiteral(node)) { const value = Number(node.text); return Number.isFinite(value) ? { value } : undefined; }
   if (node.kind === ts.SyntaxKind.TrueKeyword) return { value: true };
   if (node.kind === ts.SyntaxKind.FalseKeyword) return { value: false };
   if (node.kind === ts.SyntaxKind.NullKeyword) return { value: null };
-  if (ts.isPrefixUnaryExpression(node) && ts.isNumericLiteral(node.operand) && node.operator === ts.SyntaxKind.MinusToken) return { value: -Number(node.operand.text) };
+  if (ts.isPrefixUnaryExpression(node) && ts.isNumericLiteral(node.operand) && node.operator === ts.SyntaxKind.MinusToken) {
+    const value = -Number(node.operand.text);
+    return Number.isFinite(value) && !Object.is(value, -0) ? { value } : undefined;
+  }
   return;
 }
 /** Produces facts only from supplied head source. No files or globals are opened. */

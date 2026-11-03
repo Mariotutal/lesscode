@@ -149,7 +149,9 @@ describe("one review engine", () => {
 
   it("withdraws edits and rewrites the note when final command verification fails", async () => {
     const dir = repository({ ...files, "package.json": JSON.stringify({ type: "module", scripts: { test: "node -e 'process.exit(1)'" } }) });
-    const client = model([finding], [inline], [{ kind: "load-bearing", text: "Inline this wrapper.", citations: [cite("src/wrap.js", 2, 4)], ordersEditForFinding: 0 }]);
+    const client = model([finding], [inline], [{ kind: "load-bearing", text: "Inline this wrapper.", citations: [cite("src/wrap.js", 2, 4)], ordersEditForFinding: 0,
+      claims: [{ factId: 'not-an-authoritative-fact', assertion: 'returns:false' }],
+    }]);
     const r = await runReview({ checkout: dir, base: "HEAD", intent: Object.keys(files), sparkClient: client, wonderClient: client });
     expect(r.verdict).toBe("reviewed"); expect(r.outcome).toBe("unverified"); expect(r.artifact).toBeNull();
     expect(r.edits[0]?.status).toBe("withdrawn");
