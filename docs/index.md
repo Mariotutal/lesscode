@@ -17,4 +17,7 @@ Review a committed JavaScript or TypeScript change and receive a cited note plus
 - [Bounded factual verification](factual-review-verification.md)
 - [Validation status and limitations](validation.md)
 
+The source is licensed under [Apache-2.0](https://github.com/Mariotutal/lesscode/blob/master/LICENSE). No license choice is
+implied for external providers, models or trademarks.
+
 [Historical measurements](eval-live-runs.md), the [development log](development.md) and the [original pull-request load proposal](pull-request-load-spec.md) preserve earlier results and designs. They are not installation instructions or evidence that today's model configuration has a measured global accuracy percentage.

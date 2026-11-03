@@ -169,5 +169,6 @@ refresh remains intact. Links, Markdown, the README shell examples and the
 documentation build have been validated. The next review step is a human
 newcomer/agent rehearsal of the page; it is not a runtime or model-quality
 test.
-No dependency/SDK migration, npm publication, license choice, infrastructure
-change or live accuracy campaign is required by this README redesign.
+No dependency/SDK migration, npm publication, infrastructure change or live
+accuracy campaign was required by this README redesign. Licensing is now
+handled separately under Apache-2.0 in the licensing PR.

@@ -1,5 +1,9 @@
 # Install LessCode
 
+LessCode is distributed under the [Apache License 2.0](https://github.com/Mariotutal/lesscode/blob/master/LICENSE). The
+license covers this repository's work; provider terms, model terms and
+third-party dependency licenses remain separate.
+
 ## Requirements
 
 - Node.js **22 or later**, npm and Git available to the process running LessCode.
