@@ -8,7 +8,7 @@ import { boundedFetch } from '../eval/upstream/budget.js';
 const cases = corpusSchema.parse(JSON.parse(readFileSync(new URL('../eval/upstream/manifest.json', import.meta.url), 'utf8')));
 const c = cases[0]!;
 const receipt = (): InvocationReceipt => ({ adapter: 'cli', startedAt: '2026-11-03T00:00:00Z', completedAt: '2026-11-03T00:00:01Z', attempts: 2,
-  responseModels: ['observed-model'], responseTokens: 40, maxRequests: 4, maxPromptBytes: 32768, maxCompletionTokens: 8192 });
+  responseModels: ['observed-model', 'observed-model'], responseTokens: 40, maxRequests: 4, maxPromptBytes: 32768, maxCompletionTokens: 8192 });
 const record = () => ({ schemaVersion: 1, runId: 'unique-invocation', state: 'completed', verdict: 'reviewed', outcome: 'no-change',
   revision: { baseSha: c.base, headSha: c.head, scope: 'declared' }, execution: { kind: 'docker', policyVersion: 1, configSource: 'operator-environment', environmentId: `sha256:${'a'.repeat(64)}` },
   findings: [], findingIds: [], edits: [], gate: null, artifact: null, failure: null,
