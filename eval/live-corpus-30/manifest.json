@@ -1,5 +1,8 @@
 [
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "cli-micromark-util-combine-html",
     "sourceUrl": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-combine-html",
     "license": "MIT",
@@ -14,6 +17,9 @@
     "repoHint": "micromark subpkg synthetic"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "cli-eventemitter3-once-wrapper",
     "sourceUrl": "https://github.com/primus/eventemitter3",
     "license": "MIT",
@@ -28,6 +34,9 @@
     "repoHint": "eventemitter3 minimal clone"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "cli-is-number-duplicate",
     "sourceUrl": "https://github.com/micromatch/is-number",
     "license": "MIT",
@@ -42,6 +51,9 @@
     "repoHint": "is-number minimal"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "mcp-micromark-util-decode-string",
     "sourceUrl": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-decode-string",
     "license": "MIT",
@@ -56,6 +68,9 @@
     "repoHint": "micromark subpkg"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "mcp-eventemitter3-emit-wrapper",
     "sourceUrl": "https://github.com/primus/eventemitter3",
     "license": "MIT",
@@ -70,6 +85,9 @@
     "repoHint": "eventemitter3 minimal"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "mcp-p-queue-duplicate-not-equivalent",
     "sourceUrl": "https://github.com/sindresorhus/p-queue",
     "license": "MIT",
@@ -84,6 +102,9 @@
     "repoHint": "p-queue minimal"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "skill-micromark-util-normalize-identifier",
     "sourceUrl": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-normalize-identifier",
     "license": "MIT",
@@ -98,6 +119,9 @@
     "repoHint": "micromark subpkg"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "skill-eventemitter3-listeners-wrapper",
     "sourceUrl": "https://github.com/primus/eventemitter3",
     "license": "MIT",
@@ -112,6 +136,9 @@
     "repoHint": "eventemitter3 minimal"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "skill-is-plain-obj-duplicate-equivalent",
     "sourceUrl": "https://github.com/sindresorhus/is-plain-obj",
     "license": "MIT",
@@ -126,6 +153,9 @@
     "repoHint": "is-plain-obj minimal"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "cli-nanoid-convention-registered",
     "sourceUrl": "https://github.com/ai/nanoid",
     "license": "MIT",
@@ -140,6 +170,9 @@
     "repoHint": "nanoid synthetic + lesscode-conventions.json"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "cli-chalk-allowjs-single-use",
     "sourceUrl": "https://github.com/chalk/chalk",
     "license": "MIT",
@@ -154,6 +187,9 @@
     "repoHint": "chalk synthetic allowJs"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "cli-camelcase-checkjs-false-single-use",
     "sourceUrl": "https://github.com/sindresorhus/camelcase",
     "license": "MIT",
@@ -168,6 +204,9 @@
     "repoHint": "camelcase synthetic checkJs:false"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "cli-indent-string-failed-baseline",
     "sourceUrl": "https://github.com/sindresorhus/indent-string",
     "license": "MIT",
@@ -182,6 +221,9 @@
     "repoHint": "indent-string synthetic failing test"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "cli-strip-ansi-duplicate-equivalent",
     "sourceUrl": "https://github.com/chalk/strip-ansi",
     "license": "MIT",
@@ -196,6 +238,9 @@
     "repoHint": "strip-ansi minimal"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "cli-ansi-regex-duplicate-not-equivalent",
     "sourceUrl": "https://github.com/chalk/ansi-regex",
     "license": "MIT",
@@ -210,6 +255,9 @@
     "repoHint": "ansi-regex minimal"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "cli-p-limit-scope-creep",
     "sourceUrl": "https://github.com/sindresorhus/p-limit",
     "license": "MIT",
@@ -224,6 +272,9 @@
     "repoHint": "p-limit synthetic scope-creep"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "mcp-nanoid-convention-registered",
     "sourceUrl": "https://github.com/ai/nanoid",
     "license": "MIT",
@@ -238,6 +289,9 @@
     "repoHint": "nanoid synthetic convention"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "mcp-chalk-allowjs-single-use",
     "sourceUrl": "https://github.com/chalk/chalk",
     "license": "MIT",
@@ -252,6 +306,9 @@
     "repoHint": "chalk allowJs"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "mcp-camelcase-checkjs-false-single-use",
     "sourceUrl": "https://github.com/sindresorhus/camelcase",
     "license": "MIT",
@@ -266,6 +323,9 @@
     "repoHint": "camelcase checkJs:false"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "mcp-indent-string-failed-baseline",
     "sourceUrl": "https://github.com/sindresorhus/indent-string",
     "license": "MIT",
@@ -280,6 +340,9 @@
     "repoHint": "indent-string failing"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "mcp-strip-ansi-duplicate-equivalent",
     "sourceUrl": "https://github.com/chalk/strip-ansi",
     "license": "MIT",
@@ -294,6 +357,9 @@
     "repoHint": "strip-ansi dup"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "mcp-lodash-duplicate-not-equivalent",
     "sourceUrl": "https://github.com/lodash/lodash",
     "license": "MIT",
@@ -308,6 +374,9 @@
     "repoHint": "lodash dup not equiv"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "mcp-p-queue-scope-creep-lesscode-pr",
     "sourceUrl": "https://github.com/sindresorhus/p-queue",
     "license": "MIT",
@@ -322,6 +391,9 @@
     "repoHint": "p-queue scope-creep + lesscode-pr.json"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "skill-nanoid-convention-registered",
     "sourceUrl": "https://github.com/ai/nanoid",
     "license": "MIT",
@@ -336,6 +408,9 @@
     "repoHint": "nanoid skill convention"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "skill-chalk-allowjs-single-use",
     "sourceUrl": "https://github.com/chalk/chalk",
     "license": "MIT",
@@ -350,6 +425,9 @@
     "repoHint": "chalk skill allowJs"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "skill-camelcase-checkjs-false-single-use",
     "sourceUrl": "https://github.com/sindresorhus/camelcase",
     "license": "MIT",
@@ -364,6 +442,9 @@
     "repoHint": "camelcase skill checkJs:false"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "skill-indent-string-failed-baseline",
     "sourceUrl": "https://github.com/sindresorhus/indent-string",
     "license": "MIT",
@@ -378,6 +459,9 @@
     "repoHint": "indent-string skill failing"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "skill-strip-ansi-lesscode-pr",
     "sourceUrl": "https://github.com/chalk/strip-ansi",
     "license": "MIT",
@@ -392,6 +476,9 @@
     "repoHint": "strip-ansi lesscode-pr.json"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "skill-p-limit-duplicate-equivalent",
     "sourceUrl": "https://github.com/sindresorhus/p-limit",
     "license": "MIT",
@@ -406,6 +493,9 @@
     "repoHint": "p-limit dup"
   },
   {
+    "sourceStatus": "unverified-project-inspiration-only",
+    "licenseStatus": "unverified",
+    "fixtureKind": "synthetic",
     "id": "skill-ansi-regex-scope-creep",
     "sourceUrl": "https://github.com/chalk/ansi-regex",
     "license": "MIT",

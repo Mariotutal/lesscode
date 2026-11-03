@@ -1,7 +1,7 @@
 {
   "generatedAt": "2026-11-02T23:35:07.557Z",
-  "mode": "live",
-  "note": "live run with real model via LESSCODE_API_KEY from .env; synthetic repos in mkdtemp; no fixtures/sealed read; gate coverage fixed via transitive caller tests",
+  "mode": "invalid-legacy-evaluation",
+  "note": "Quarantined: synthetic inputs, scripted guest responses by default, copied MCP verdicts, and fabricated CLI records. Not evidence of 30 upstream projects, live model quality, or adapter parity. Original rows are retained for diagnosis only.",
   "results": [
     {
       "id": "cli-micromark-util-combine-html",
@@ -2343,5 +2343,10 @@
       },
       "sealNeverRead": true
     }
-  ]
+  ],
+  "originalClaim": {
+    "mode": "live",
+    "note": "live run with real model via LESSCODE_API_KEY from .env; synthetic repos in mkdtemp; no fixtures/sealed read; gate coverage fixed via transitive caller tests"
+  },
+  "usableForReleaseDecision": false
 }

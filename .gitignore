@@ -6,6 +6,9 @@ dist/
 .lesscode-data/
 .lesscode-service/
 
+# Unverified local artifacts from the retired external-audit harness
+eval/live-corpus-30/out/
+
 # VitePress build output
 /docs/.vitepress/dist/
 /docs/.vitepress/cache/
