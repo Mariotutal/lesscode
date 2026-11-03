@@ -7,6 +7,7 @@ import { runReview } from "../src/engine/run.js";
 import { transactEdit } from "../src/engine/transaction.js";
 import { measureSource } from "../src/gate/metrics.js";
 import type { GuestClient } from "../src/classify/client.js";
+import { runRecordSchema } from '../src/contracts/review.js';
 
 const temporary: string[] = [];
 function directory() { const dir = mkdtempSync(join(tmpdir(), "lc-engine-test-")); temporary.push(dir); return dir; }
@@ -63,6 +64,48 @@ it('pins Wonder configuration before Spark, and sees changed environment on the 
   } finally { process.env = before; vi.unstubAllGlobals(); }
 });
 
+it.each(['contradicted', 'true-claim-false-prose', 'unstructured'] as const)('owns factual verification at the engine seam: %s', async (mode) => {
+  const dir = repository({
+    'package.json': JSON.stringify({ type: 'module' }),
+    'src/module.js': "export function classify(value) {\n if(typeof missingValue === 'number') return missingValue;\n return false;\n}\n",
+  });
+  let wonderCalls = 0;
+  const client: GuestClient = { config: { model: 'scripted', baseUrl: 'stub', apiKey: 'test' }, async chat(req) {
+    const name = req.tools![0]!.function.name;
+    let payload: unknown = { findings: [] };
+    if (name !== 'report_findings') {
+      wonderCalls++;
+      const content = req.messages.at(-1)!.content!;
+      const list = JSON.parse(content.split('Code-derived facts (bounded scope, not model opinions):\n')[1]!.split('\n\nSurrounding files')[0]!) as { id: string; assertion: string }[];
+      expect(list[0]!.assertion).toBe('returns:false');
+      payload = { edits: [], review: [{ kind: 'question', text: 'This definitely throws ReferenceError.',
+        citations: [{ file: 'src/module.js', startLine: 1, endLine: 4 }],
+        claims: mode === 'unstructured' ? [] : [{ factId: list[0]!.id, assertion: mode === 'contradicted' ? 'throws:ReferenceError' : 'returns:false' }],
+        verification: { status: 'verified' },
+      }] };
+    }
+    return { content: null, finishReason: 'tool_calls', toolCalls: [{ id: '1', type: 'function', function: { name, arguments: JSON.stringify(payload) } }] };
+  } };
+  const record = await runReview({ checkout: dir, base: 'HEAD', intent: ['src/module.js'], sparkClient: client, wonderClient: client });
+  expect(record.state).toBe('completed');
+  expect(wonderCalls).toBe(1);
+  expect(record.artifact).toBeNull();
+  const serialized = runRecordSchema.parse(record);
+  expect(serialized.review.facts?.[0]?.assertion).toBe('returns:false');
+  if (mode === 'contradicted') {
+    expect(record.review.items).toEqual([]);
+    expect(record.review.verification?.withheldItems).toBe(1);
+    expect(record.audit.reviewVerification?.[0]?.checks[0]?.status).toBe('contradicted');
+  } else if (mode === 'true-claim-false-prose') {
+    expect(record.review.items[0]?.verification?.status).toBe('verified');
+    expect(record.review.items[0]?.text).not.toContain('definitely throws');
+    expect(record.review.items[0]?.text).toContain('returns:false');
+  } else {
+    expect(record.review.items[0]?.verification?.status).toBe('unverified');
+    expect(record.review.markdown).toContain('unverified model advice');
+  }
+});
+
  describe("atomic edit transactions", () => {
   it("restores every importer and deletion after rejection or a verification exception", async () => {
     const dir = directory(); put(dir, "src/a.js", "before-a"); put(dir, "src/b.js", "before-b");
@@ -106,7 +149,9 @@ describe("one review engine", () => {
 
   it("withdraws edits and rewrites the note when final command verification fails", async () => {
     const dir = repository({ ...files, "package.json": JSON.stringify({ type: "module", scripts: { test: "node -e 'process.exit(1)'" } }) });
-    const client = model([finding], [inline], [{ kind: "load-bearing", text: "Inline this wrapper.", citations: [cite("src/wrap.js", 2, 4)], ordersEditForFinding: 0 }]);
+    const client = model([finding], [inline], [{ kind: "load-bearing", text: "Inline this wrapper.", citations: [cite("src/wrap.js", 2, 4)], ordersEditForFinding: 0,
+      claims: [{ factId: 'not-an-authoritative-fact', assertion: 'returns:false' }],
+    }]);
     const r = await runReview({ checkout: dir, base: "HEAD", intent: Object.keys(files), sparkClient: client, wonderClient: client });
     expect(r.verdict).toBe("reviewed"); expect(r.outcome).toBe("unverified"); expect(r.artifact).toBeNull();
     expect(r.edits[0]?.status).toBe("withdrawn");

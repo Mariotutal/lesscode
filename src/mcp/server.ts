@@ -23,7 +23,7 @@ export function createMcpServer(options: McpOptions) {
   const root = realpathSync(options.root);
   const server = new McpServer({ name: 'lesscode', version: '0.1.0' });
   server.registerTool('review_change', {
-    description: 'Review a change and return the canonical RunRecord. The deterministic engine decides the verdict.',
+    description: 'Review a change and return the canonical RunRecord. The engine decides the patch verdict. Review-item verification is separate: verified bounded facts include their assumptions; unverified model advice is not fact-checked.',
     inputSchema: reviewInput,
     outputSchema: runRecordSchema,
   }, async (input, extra) => {

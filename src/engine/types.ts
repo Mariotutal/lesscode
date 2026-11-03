@@ -5,6 +5,7 @@ import type { RunManifest } from "../manifest.js";
 import type { AnyFinding } from "../plan/plan.js";
 import type { PlannedEdit, ReviewNoteItem } from "../plan/schema.js";
 import type { RepositoryExecutor } from "../execution/index.js";
+import type { ClaimCheck, ReviewFact } from '../review/claims.js';
 
 export interface ReviewRequest {
   checkout: string;
@@ -34,7 +35,11 @@ export interface EditOutcome {
   reason?: DecisionReason;
 }
 
-export interface ReviewNote { items: ReviewNoteItem[]; markdown: string }
+export interface ReviewNote {
+  items: ReviewNoteItem[]; markdown: string;
+  facts?: ReviewFact[];
+  verification?: { policyVersion: 1; verifiedItems: number; unverifiedItems: number; withheldItems: number };
+}
 
 export interface RunAudit {
   droppedFindings: number;
@@ -45,6 +50,7 @@ export interface RunAudit {
   plan: { edits: number; skipped: { findingIndex: number; reason: string }[]; model: string; modelCalls: number; usage?: unknown; review: ReviewNoteItem[]; responseModel?: string };
   reasons: string[];
   tsConfig: { allowJs: boolean; checkJs: boolean };
+  reviewVerification?: { itemIndex: number; checks: ClaimCheck[]; reason: string }[];
 }
 
 /** Serialized product contract shared by local callers and hosted workers. */

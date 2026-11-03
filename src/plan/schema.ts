@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { factualClaimSchema, type NoteVerification } from '../review/claims.js';
 
 /**
  * Wonder plan schema (LES-4). muse-wonder-1.0 plans ONCE per run: it
@@ -67,8 +68,10 @@ export const reviewNoteItemSchema = z.object({
    * such an item with the gate reason when the gate rejected that edit.
    */
   ordersEditForFinding: z.number().int().nonnegative().optional(),
+  /** Model-declared assertions; the engine owns all verification results. */
+  claims: z.array(factualClaimSchema).max(8).optional(),
 });
-export type ReviewNoteItem = z.infer<typeof reviewNoteItemSchema>;
+export type ReviewNoteItem = z.infer<typeof reviewNoteItemSchema> & { verification?: NoteVerification };
 
 /** Wonder's single response: the edit plan AND the review note together. */
 export const wonderOutputSchema = z.object({
