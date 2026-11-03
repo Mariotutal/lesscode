@@ -8,6 +8,7 @@ dist/
 
 # Unverified local artifacts from the retired external-audit harness
 eval/live-corpus-30/out/
+.lesscode-eval/
 
 # VitePress build output
 /docs/.vitepress/dist/
