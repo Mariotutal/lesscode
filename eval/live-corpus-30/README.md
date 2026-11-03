@@ -1,5 +1,7 @@
 # Quarantined 30-case evaluation
 
+Use the [current validation guide](../../docs/validation.md) for supported evaluators and the [installation guide](../../docs/install.md) for setup. This directory remains diagnostic history.
+
 **These files do not establish a live 30-project evaluation.** Do not
 use their verdict totals or expected-match flags for release decisions.
 `results.json` retains the historical observations and original claim,
@@ -68,5 +70,4 @@ credentials and incurs model usage; this correction does not run it.
    separately from correctness and successful note-only runs. Derive
    summary counts from the saved evidence, not hardcoded booleans.
 
-This replacement has **not** been implemented here. The legacy format
-cannot be upgraded into trustworthy live evidence after the fact.
+A separate bounded replacement pilot is implemented in `eval/upstream/`; it is not a completed 30-project study and does not rehabilitate this directory. The legacy format cannot be upgraded into trustworthy live evidence after the fact.

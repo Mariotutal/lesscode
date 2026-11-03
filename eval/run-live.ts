@@ -6,11 +6,14 @@
  * with the model identifiers so a model change shows up as a diff
  * in the numbers.
  *
- * Usage: LESSCODE_API_KEY=... npx tsx eval/run-live.ts
- * Roles resolve through the provider factory: LESSCODE_SPARK_MODEL /
- * LESSCODE_WONDER_MODEL (shared LESSCODE_MODEL), LESSCODE_API_BASE_URL,
- * or a committed `.lesscode.json`. Examples:
- *   LESSCODE_SPARK_MODEL=meta/muse-spark-1.3 LESSCODE_WONDER_MODEL=anthropic/claude-sonnet-4
+ * Usage: supply LESSCODE_API_KEY from the operator environment, then:
+ *   LESSCODE_API_BASE_URL=https://inference.baseten.co/v1 \
+ *   LESSCODE_SPARK_MODEL=meta-models/muse-spark-open-1026 \
+ *   LESSCODE_WONDER_MODEL=meta-models/muse-spark-open-1026 \
+ *   node --import tsx eval/run-live.ts
+ * Roles resolve through the provider factory, including operator trusted policy.
+ * This entry loads neither .env nor a local .lesscode.json automatically.
+ * It makes real calls and appends dated measurements; see docs/validation.md.
  */
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

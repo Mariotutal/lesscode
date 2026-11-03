@@ -1,86 +1,72 @@
 # Architecture
 
-Current hardening work is tracked in [the implementation plan](architecture-hardening-plan.md). CLI, skills and MCP share the versioned RunRecord and strict review arguments. MCP framing/lifecycle belongs to the official SDK; repository execution and approved filesystem roots belong to the host. The engine resolves both model roles before model execution and does not grant trust to preloaded repository configuration.
+LessCode has one review engine, `runReview`, and one canonical `RunRecord`. Local commands, official MCP transport, the portable skill's CLI command, GitHub review and hosted workers all consume that engine. Publication and deployment policy stay outside it.
 
-For a separate API and execution host, see [hosted deployment](hosted-deployment.md). The API can delegate to a private authenticated worker without GitHub/model keys or Docker authority. Single-process durable stores remain explicit; multi-tenant transactional scheduling is a separate migration requirement.
-
-`runReview` owns one review. It resolves the commit, prepares the edit, checks the result, and returns one `RunRecord`. Local commands, a fetched pull request, and the hosted service all call it. GitHub publication sits outside the engine and is pinned to the commit that was reviewed.
+The compatibility function `review(checkout, base, intent)` projects the record into `applied`, `review`, `verdict`, `findings` and `gate`, with the full record at `run`. A note-only run succeeds. `simplify` is a legacy patch-only projection, not a second decision engine.
 
 ```mermaid
 flowchart TD
-  local["Local CLI"] --> engine["runReview"]
-  pr["GitHub pull request"] --> load["Load that head and base by SHA"]
-  job["Hosted job: owner, repo, number, expected SHA"] --> load
-  load --> engine
-  engine --> work["Scratch worktree at the reviewed commit"]
-  work --> models["Spark classifies. Wonder plans once."]
-  models --> edit["Prepare the full edit, then apply it or roll it back"]
-  edit --> verify["Tests, typecheck, and lint on that exact tree"]
-  verify --> record["One RunRecord"]
-  record --> note["Cited note"]
-  record --> patch["Patch only when the tree still matches the ledger"]
-  patch --> publish["GitHub caller publishes the check and note for that commit"]
+  cli["CLI / portable skill"] --> engine["Shared review engine"]
+  mcp["Official MCP SDK"] --> engine
+  github["Immutable GitHub source loader"] --> engine
+  service["Hosted job API / worker"] --> github
+  engine --> snapshot["Private clone pinned to head + base"]
+  snapshot --> spark["Spark: findings + deterministic evidence filters"]
+  spark --> facts["Code-derived bounded fact catalog"]
+  facts --> wonder["Wonder once: edits + note + declared claims"]
+  wonder --> edits["Generated edit transactions + patch gate"]
+  edits --> claims["Citation/scope checks + factual claim verification"]
+  claims --> record["Canonical RunRecord"]
+  record --> note["Verified bounded facts / unverified advice"]
+  record --> artifact["Accepted patch artifact, when any"]
+  record --> publication["Separate GitHub publication policy"]
 ```
 
-## Callers
+## Responsibilities
 
-| Caller | Entry | What it executes |
-|---|---|---|
-| Local review | `npm run review` | Commands on the machine for a checkout you trust, or in Docker when `--execution docker` is set. |
-| Patch-only view | `npm run simplify`, `npm run plan` | The same run. `simplify` reports `accepted` or `refused`. The plan command still requires `--gate-base` and reviews against `--base`. |
-| Agent tool | `simplify` and `review_change` | `simplify` returns the patch-only view. `review_change` returns the `RunRecord`. The host chooses the executor. The model does not. |
-| GitHub command | `npm run github-pr-review` | Fetches the pull request, then runs in the runner image. Posts the check and the note for that commit. |
-| Hosted service | `npm run service` | Queues the same GitHub load. Publication stays off unless the operator turns it on. |
+| Module | Responsibility |
+| --- | --- |
+| `src/engine/` | Snapshot identity, transactions, final verification, review assembly and result ownership. |
+| `src/source/`, `src/pr/` | Immutable PR head/base loading, declaration/inferred scope, revision-bound GitHub publication. |
+| `src/provider/` | Operator credential/endpoint authority, model roles, protocol, timeout/retry and response normalization. |
+| `src/execution/` | Trusted local or Docker repository execution; dependency preparation, restricted environment and disposal. |
+| `src/classify/`, `src/plan/`, `src/gate/` | Closed findings, supported generated transforms and patch checks. |
+| `src/review/claims.ts`, `factCatalog.ts`, `primitiveTrace.ts`, `verifyClaims.ts` | Bounded facts, structured claim checks and code-rendered verified statements. |
+| `src/contracts/`, `src/cli/`, `src/mcp/`, `src/tool/` | Canonical input/output schemas and adapters. |
+| `src/service/` | Authenticated bounded durable jobs and optional remote-worker delegation. |
 
-A fetched pull request has no local-process fallback. The runner image is built from `docker/runner.Dockerfile` and is never pulled during a run. The engine records the image id it inspected.
+## One run
 
-## The run
+1. Resolve requested base and committed head. Clone privately, detach at the reviewed head and exclude sealed/node_modules paths from source checkout. Copy operator-supplied dependencies only for trusted local use; the caller checkout stays unchanged.
+2. Prepare dependencies through the selected executor. Docker uses npm, ignores install scripts, pins an approved preinstalled image and verifies without network access. Source mutation during preparation fails the run.
+3. Resolve both model roles before Spark, using one operator environment snapshot and root-bounded configuration. Fetched config has no endpoint/credential authority.
+4. Scope context to intent, changed files, related tests and one-hop neighbors. Explicitly requested JavaScript tests are included independently of compiler JS settings. Sealed paths remain excluded; `checkJs` stays as the repository configured it. Context overflow fails before a request.
+5. Spark reports findings with `tool_choice: auto`; code checks evidence and structural eligibility. Scope creep is computed from the diff. A schema-validation failure allows one classifier validation retry; HTTP transport retry is separate and only 429/5xx is retried.
+6. Construct code-derived facts from the pinned head context. Wonder is called once and returns edit decisions plus review items and any structured factual claims. Invalid output has no model-written patch fallback. The planner counts its complete serialized request before calling a model.
+7. Generate and transact supported edits. Inline/retarget use AST codemods, restore uses base text, and convention fixes require registration and an enabled mechanical fix. Protected tests/sealed paths are never edit targets. Structural rejection restores files and permissions.
+8. If edits survive, run repository tests, typecheck and lint on that exact cumulative tree, with the existing baseline/structural checks. Command failures, pre-existing test failures and unexpected source mutations cannot produce an accepted patch. The gate establishes bounded properties, not equivalence for untested behavior.
+9. Finalize the note: check citations/scope, preserve gate-driven “Not applied” explanations, check declared facts against the head catalog, withhold unsupported/contradicted factual items, render verified factual text from code, and label other advice unverified. No extra Wonder call or repository execution is added for this verification.
+10. Return patch only when it is nonempty, accepted and matches the verified ledger/tree. Record the artifact hash, tree identity and paths, then dispose the workspace. A successful run without a patch returns `reviewed`.
 
-1. **Resolve.** The checkout is cloned into a scratch worktree and detached at the expected commit. `fixtures/*/sealed/` is left out of the sparse checkout. The caller's checkout is not the worktree.
-2. **Prepare.** The executor installs dependencies. For a local run they are copied from the checkout. For Docker, npm installs into a volume (`npm ci` when a lockfile exists, with scripts ignored). Another package manager is refused. If preparation changes the source snapshot, the run fails.
-3. **Classify.** Spark (`muse-spark-1.3`) reports findings through one tool call. Citations have to name lines that exist. A finding that cites a sealed path is dropped. Scope creep is computed from the diff, not from the model.
-4. **Plan.** Wonder (`muse-wonder-1.0`) is called once. The plan may choose `inline`, `retarget`, `restore-from-base`, `convention-fix`, or `skip`. An invalid plan produces no edits. The model does not supply the bytes that get written.
-5. **Prepare each edit.** Code computes the complete write set: generated source for an inline or retarget, the base text for a restore, or the mechanical convention fix. A convention fix runs only when `lesscode-conventions.json` lists that name. An edit that cannot be expressed this way is skipped.
-6. **Transaction.** The write set is applied, a structural check runs, and the files roll back — including their previous permissions — when the check rejects the edit. A restore may be kept when the only failing structural check is the size drop. Each finding ends as kept, skipped, rejected, or withdrawn, with the stage that decided it.
-7. **Verify.** When at least one edit was kept, tests, typecheck, and lint run once on that tree. The test command is the repository's own `npm test`, followed by the related-test paths. If those commands change the source, every kept edit is withdrawn and no patch is returned. The same happens when a check fails, including a test suite that was already failing on the untouched commit.
-8. **Record.** A patch is stored only when the files on disk match the ledger of kept edits and the diff is non-empty. The record holds the diff, its sha256, the Git tree hash, and the paths. The scratch worktree is then deleted.
+## Independent result meanings
 
-The note is built from the plan after the edits are decided. An item whose citation does not exist is dropped. An item that asked for an edit which was not kept stays in the note as “Not applied,” with the reason, and no longer orders that edit.
+- `verdict`, `artifact`, `gate` and top-level `verification` describe patch/execution outcomes.
+- `review.items[].verification`, `review.facts` and `review.verification` describe bounded factual checks and unverified advice.
+- `audit.reviewVerification` explains withheld declared claims. Raw planner text is diagnostic data, not published verified prose.
+- `manifest` records requested/served models, calls, usage/cost completeness, phase times and prompt SHA-256s. It does not contain model keys or request bodies.
 
-## Providers
+See [usage](run.md#interpret-the-record) for consumer behavior and [factual verification](factual-review-verification.md) for supported predicates and assumptions. A source-presence fact does not establish semantic coverage; a conditional primitive trace does not prove whole-program execution. Older records without factual fields have unknown verification.
 
-Both roles speak one OpenAI-compatible contract, implemented in `src/provider/factory.ts`: `POST {baseUrl}/chat/completions` with `model`, `messages`, and — when tools are sent — `tools` plus `tool_choice: "auto"` (never forced). Spark's tool is `report_findings`; Wonder's is `propose_surgical_patch`, which returns the edit plan and the note together in Wonder's single call. Only HTTP `429` and `5xx` are retried (at most twice, exponential backoff); other statuses fail the call, and each attempt has a 5-minute timeout. Resolution is per role: explicit argument > `LESSCODE_*` env (per-role, then shared) > operator-owned trusted policy (`LESSCODE_TRUSTED_POLICY` / `_FILE`) > a `.lesscode.json` in a trusted operator cwd (`providers` + `models`, keys only via `apiKeyEnv`) or, when a trusted policy is present, alias+model requests from an untrusted checkout > deprecated `META_*` / `MODEL_API_KEY` aliases > defaults (`https://api.meta.ai/v1`, `muse-spark-1.3` / `muse-wonder-1.0`). Fetched checkouts cannot choose `baseUrl` or `apiKeyEnv`. The provider's returned `model` is recorded in the manifest as `responseModels`, and `usage` feeds the derived `cost` (see [Providers and gateways](providers.md)); cost never gates a run.
+## Trust and adapters
 
-## The gate
+The installed CLI writes a result file; the development review command prints JSON. MCP uses the official SDK with approved filesystem roots and host-selected execution. The portable skill calls the installed CLI and does not invent a verdict. HTTP MCP is authenticated and isolated; trusted stdio/local execution is an explicit operator choice. See [Consumers](consumers.md).
 
-A patch is accepted when all of these hold:
+The built-in provider protocol is OpenAI Chat Completions. Operator-injected `ModelProtocol` implementations can normalize native APIs, but native vendor compatibility is not implied by changing a URL. Policy-selected endpoints and credential bindings are authoritative; see [Providers](providers.md) for actual per-mode precedence.
 
-- related tests, typecheck, and ESLint on the touched files exit 0
-- exports outside the edit set are unchanged
-- the code-line size drops, ignoring comment-only hunks
-- no surviving function's cyclomatic complexity rises by more than 10%
-- the patch removes or skips no test
-- the verification commands leave the prepared tree unchanged
+## Publication and hosting
 
-The structural checks run inside each edit's transaction. The repository commands run once, after the kept edits are assembled.
+GitHub publication checks that the PR still has the reviewed head and that an offered artifact matches its evidence. The check conclusion comes from the gate, not a prose note. The command can post checks/comments without offering a patch and never merges or changes the PR branch.
 
-## The record
+The hosted API queues a GitHub identity and defaults to no publication. Its stored artifact is an outcome envelope containing the canonical `run`. An API host can delegate over private authenticated HTTPS without GitHub/model credentials or Docker authority. Each durable file store has one process owner; API timeout does not establish remote cancellation. See [Hosted deployment](hosted-deployment.md).
 
-`RunRecord` is the contract shared by the local CLI and the hosted worker. The fields a caller acts on:
-
-- `verdict` — `accepted`, `reviewed`, or `failed`
-- `outcome` — `patch-ready`, `review-only`, `no-change`, `unverified`, or `null` when the run failed
-- `revision` — the head commit, the comparison base, and whether the scope was declared or inferred
-- `edits` — one outcome per finding, with its status and reason
-- `review` — the note items and their markdown
-- `artifact` — the verified patch, present only for an accepted run
-- `gate` — the checks and metrics from the last decision
-- `failure` — the stage and message when the run did not finish
-
-`review()` in `src/review/review.ts` returns that record plus the earlier fields (`applied`, `findings`, `summary`). The review command prints the record itself.
-
-## Publication
-
-`runGithubPrReview` loads one immutable head and base, calls the engine once, and refuses to publish a patch whose verification evidence does not match the record. The Check Run conclusion comes from the gate. The comment is the note. If the pull request head moves before publication, the result is not posted to the new commit.
-
-The hosted service stores the job and the artifact. Its request body cannot name a local path, an image, or a publish flag. Publishing remains an operator setting on the runner, and the default is off.
+The [hardening roadmap](architecture-hardening-plan.md) distinguishes shipped work from transactional scheduling, tenant storage/authorization, remote cancellation and hostile-code isolation still required before a public multi-tenant offering.

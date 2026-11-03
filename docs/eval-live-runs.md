@@ -1,4 +1,6 @@
-# Live evaluation runs (LES-27)
+# Historical live evaluation runs (LES-27)
+
+For current evaluator commands, measured verification results and limits, read [Validation](validation.md). The dated entries below preserve their original models, outcomes and expectations; they are not current install/use guidance or a global review-accuracy measurement.
 
 Recorded live runs of the eval corpus (`eval/`). Each section is one run: model identifiers, date, and the precision/recall/verdict table. A model change shows up as a diff in these numbers.
 

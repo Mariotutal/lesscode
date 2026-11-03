@@ -1,5 +1,7 @@
 # Upstream pilot observations — 2026-11-03 UTC
 
+This is a dated observation from the named implementation revision. The later [factual verification results](factual-verification-results.md) and [current validation guide](../../docs/validation.md) describe subsequent work; the measurements below remain unchanged.
+
 These are measured outcomes, not a claim of general model quality. Raw evidence
 is retained locally under `.lesscode-eval/` and is intentionally not committed.
 

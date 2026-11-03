@@ -1,5 +1,7 @@
 # External audit evidence review
 
+This is the historical correction of a withdrawn audit. Current implementation/evaluation status is in [Validation](validation.md); the later [bounded factual verifier](factual-review-verification.md) does not make the withdrawn results valid. Counts and statements about this correction below describe its original revision.
+
 ## Disposition: original audit claims withdrawn
 
 The audit branch `external-audit/20261102-independent` at `7951e18`
@@ -57,7 +59,7 @@ are retained with invalid status, manifest origins are explicitly
 unverified, and local raw outputs are ignored by Git.
 
 The replacement evidence requirements and available real test commands
-are documented in [the corpus README](../eval/live-corpus-30/README.md).
+are documented in [the quarantined corpus README](https://github.com/Mariotutal/lesscode/blob/master/eval/live-corpus-30/README.md).
 No replacement 30-project live evaluation has been completed by this
 correction. Public hosted readiness remains subject to the outstanding
 work in [the architecture hardening plan](architecture-hardening-plan.md).

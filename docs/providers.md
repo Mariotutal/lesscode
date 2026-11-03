@@ -1,99 +1,122 @@
-# Providers and gateways
+# Providers and credentials
 
-## Resolution and protocol adapters
+Spark classifies findings; Wonder returns the edit plan and review in **one** model call. They are roles, not mandatory vendors. Configure both with tool-capable models. The built-in wire format is OpenAI Chat Completions; native vendor protocols require a host-supplied adapter.
 
-Both clients resolve before the first model call using an environment snapshot and one repository configuration read bounded to the reviewed root. A preloaded config carries no trust: only an operator-selected trusted local checkout can define credential references or endpoints. Fetched source may request aliases only from an operator registry. Redirects are rejected by the transport.
+## Tested Baseten configuration
 
-`ModelProtocol` separates wire encoding/decoding and tool capability from timeout, retry and cancellation. OpenAI Chat Completions is the built-in protocol. A trusted host can inject another adapter through `createModelClient({protocol})` (the role is the first argument); normalize content, tool calls and usage into `ChatCompletionResult`. Native Anthropic/Gemini compatibility is not implied by a base URL change; supply and fixture-test the appropriate adapter. Protocol selection is not a repository-config field. Exported provider interfaces are available at `lesscode/provider`.
+Load `LESSCODE_API_KEY` from your operator environment/secret store, then:
 
-LessCode talks to one OpenAI-compatible endpoint per model role. Set one shared key and base URL, or pin each role separately. An operator-owned `.lesscode.json` can pin providers for a trusted local checkout (see [Run](run.md)). Fetched reviews cannot.
-
-## Trusted model policy
-
-Endpoints and credential bindings are resolved only from operator-owned configuration — environment variables on the control process or a file outside the reviewed repository. The checked-out `.lesscode.json` is untrusted: it may request an approved provider alias or model, but it cannot choose arbitrary `baseUrl` or `apiKeyEnv` values and cannot cause credentials to be sent to an unapproved host.
-
-```bash
-# Inline JSON policy (control process only)
-LESSCODE_TRUSTED_POLICY='{"version":1,"providers":{"openai":{"baseUrl":"https://api.openai.com/v1","apiKeyEnv":"OPENAI_API_KEY","allowedModels":["gpt-4o"]}}}'
-
-# Or a file outside the checkout
-LESSCODE_TRUSTED_POLICY_FILE=/etc/lesscode/trusted-policy.json
+```sh
+export LESSCODE_API_BASE_URL=https://inference.baseten.co/v1
+export LESSCODE_SPARK_MODEL=meta-models/muse-spark-open-1026
+export LESSCODE_WONDER_MODEL=meta-models/muse-spark-open-1026
 ```
 
-When a trusted policy is present, provider aliases and origins are validated before any model request; unknown aliases, models, or origins fail the run before Spark is called. Without a trusted policy the process falls back to `LESSCODE_API_*` environment variables and, for local trusted use, an operator-owned `.lesscode.json` outside the fetched checkout — never to configuration inside the PR under review. See [Architecture](architecture.md) for the full trust boundary.
+For the hackathon key, use exactly `meta-models/muse-spark-open-1026` for both roles. Do not substitute the unsuffixed documentation model name. This endpoint/model combination was used by the recorded live pilots; access still depends on the operator's account/key. A dedicated deployment can have a different endpoint/model: use its documented compatible contract rather than assuming the same URL.
 
-## The contract
+If your operator secret store already exports the vendor-named key, bind it explicitly (only after loading that variable):
 
-Every provider or gateway must accept this and nothing more:
-
-- `POST {baseUrl}/chat/completions` — the base URL is joined with `/chat/completions` (a trailing slash on the base is stripped).
-- Request body: `model`, `messages`, and — when tools are sent — `tools` plus `tool_choice: "auto"`. Tool choice is never forced.
-- Tools: Spark must be able to call `report_findings`; Wonder must be able to call `propose_surgical_patch` (and return the note in the same call). A gateway that drops tool calls, rewrites tool arguments, or forces a different tool breaks the run.
-- Response: standard chat-completions JSON with `choices`, optional `usage` (`prompt_tokens` / `completion_tokens` / `total_tokens`), and `model`. The returned `model` is recorded in the manifest as `responseModels` so you can audit what the gateway actually served.
-- Retries: only HTTP `429` and `5xx` are retried (at most twice, exponential backoff). Other statuses fail the call. Each attempt has a 5-minute timeout.
-
-Auth is `Authorization: Bearer <LESSCODE_API_KEY>`. The key is never written to the manifest, the note, or logs; the manifest holds prompt SHA-256 hashes only.
-
-## OpenRouter
-
-```bash
-LESSCODE_API_BASE_URL=https://openrouter.ai/api/v1 \
-LESSCODE_API_KEY=... \
-LESSCODE_SPARK_MODEL=meta/muse-spark-1.3 \
-LESSCODE_WONDER_MODEL=anthropic/claude-sonnet-4 \
-npm run review -- --repo <dir> --base <ref> --intent src/a.ts
+```sh
+export LESSCODE_API_KEY="${BASETEN_API_KEY:?Load BASETEN_API_KEY from your operator secret store first}"
 ```
 
-`LESSCODE_API_BASE_URL=https://openrouter.ai/api/v1` yields an auditable `response.model` in the manifest: the manifest's `responseModels` shows the model OpenRouter actually routed to, which can differ from the requested id.
+`BASETEN_API_KEY` is not an automatic LessCode alias. A trusted local provider file can alternatively name it through `apiKeyEnv`; service startup still needs the shared canonical key.
 
-## Portkey
+LessCode does **not** automatically load `.env`. Put actual keys in the control process environment or secret store, never in a committed file, model note or manifest.
 
-Portkey is a gateway in front of a provider; the key and routing live in Portkey, not in LessCode.
+## Environment configuration
 
-```bash
-LESSCODE_API_BASE_URL=https://api.portkey.ai/v1 \
-LESSCODE_API_KEY=<portkey-api-key> \
-LESSCODE_SPARK_MODEL=<provider-model-id> \
-LESSCODE_WONDER_MODEL=<provider-model-id> \
-npm run review -- --repo <dir> --base <ref> --intent src/a.ts
+| Shared variable | Per-role override | Meaning |
+| --- | --- | --- |
+| `LESSCODE_API_KEY` | `LESSCODE_SPARK_API_KEY`, `LESSCODE_WONDER_API_KEY` | Credential for the selected endpoint. |
+| `LESSCODE_API_BASE_URL` | `LESSCODE_SPARK_API_BASE_URL`, `LESSCODE_WONDER_API_BASE_URL` | Base URL; `/chat/completions` is appended after trailing slashes are removed. |
+| `LESSCODE_MODEL` | `LESSCODE_SPARK_MODEL`, `LESSCODE_WONDER_MODEL` | Requested provider model ID. |
+
+Choose one shared endpoint or separate each role's endpoint/key/model. Use HTTPS for remote providers. A local development gateway can use an operator-selected loopback HTTP URL in environment mode; trusted policy endpoints require HTTPS.
+
+Defaults remain `https://api.meta.ai/v1`, Spark `muse-spark-1.3` and Wonder `muse-wonder-1.0` in code. These are compatibility defaults, not a guarantee of current model/account access. Explicit provider and role selection is recommended for reproducible runs.
+
+## Trusted local configuration
+
+A target checkout you explicitly trust may contain `.lesscode.json` at its root:
+
+```json
+{
+  "version": 1,
+  "providers": {
+    "baseten": {
+      "baseUrl": "https://inference.baseten.co/v1",
+      "apiKeyEnv": "LESSCODE_API_KEY"
+    }
+  },
+  "models": {
+    "spark": { "provider": "baseten", "model": "meta-models/muse-spark-open-1026" },
+    "wonder": { "provider": "baseten", "model": "meta-models/muse-spark-open-1026" }
+  }
+}
 ```
 
-In the Portkey dashboard, create a virtual key for the underlying provider and use that as the model key; Portkey forwards the `chat/completions` call, tools included. This client sends only `Authorization` and `Content-Type` headers, so select the provider through the Portkey virtual key / dashboard config rather than per-request gateway headers. Usage and the served model are visible in Portkey's logs, and the served model also lands in the LessCode manifest as `responseModels`.
+`apiKeyEnv` names a variable; a literal `apiKey` is rejected. Canonical environment fields can override this local file, so remove stale exports when switching configuration modes. Engine config discovery is bounded to the reviewed root and rejects escaping symlinks. The source checkout provides `schemas/lesscode.schema.json` for editor use; runtime validation does not depend on downloading an online schema.
 
-## LiteLLM proxy (local)
+## Operator policy for fetched source
 
-```bash
-# terminal 1 — proxy on http://localhost:4000
-litellm --model anthropic/claude-sonnet-4
+A fetched checkout is untrusted. It cannot choose credential-variable names or endpoints. The host may provide an operator-owned policy outside the checkout, using `LESSCODE_TRUSTED_POLICY_FILE=/absolute/operator/path/policy.json`, or inline JSON in `LESSCODE_TRUSTED_POLICY`:
 
-# terminal 2
-LESSCODE_API_BASE_URL=http://localhost:4000 \
-LESSCODE_API_KEY=<litellm-master-key-or-any-nonempty-value> \
-LESSCODE_SPARK_MODEL=claude-sonnet-4 \
-LESSCODE_WONDER_MODEL=claude-sonnet-4 \
-npm run review -- --repo <dir> --base <ref> --intent src/a.ts
+```json
+{
+  "version": 1,
+  "providers": {
+    "baseten": {
+      "baseUrl": "https://inference.baseten.co/v1",
+      "apiKeyEnv": "LESSCODE_API_KEY",
+      "allowedModels": ["meta-models/muse-spark-open-1026"]
+    }
+  },
+  "models": {
+    "spark": { "provider": "baseten", "model": "meta-models/muse-spark-open-1026" },
+    "wonder": { "provider": "baseten", "model": "meta-models/muse-spark-open-1026" }
+  }
+}
 ```
 
-LiteLLM normalises the response to the OpenAI shape, including `usage` and `model`, so cost derivation and `responseModels` work the same as against a direct provider.
+The file contains references, not secrets. When policy selects a role, its endpoint and credential binding are authoritative: a checkout may request an allowed alias/model, otherwise policy role defaults apply. Canonical endpoint/model exports do not override that selected policy role. Unknown aliases and disallowed models fail before Spark. Without policy, fetched reviews use the operator environment, not fetched provider definitions.
 
-## Baseten (mirror / dedicated deployment)
+## Resolution details
 
-Point the base URL at your Baseten deployment's OpenAI-compatible endpoint and use the deployment's model id:
+Host-supplied clients or complete explicit configurations have their own authority and bypass ordinary environment/file selection. Otherwise a selected trusted policy role is resolved first as described above. Outside that policy path, ordinary environment/file precedence is:
 
-```bash
-LESSCODE_API_BASE_URL=https://model-<id>.api.baseten.co/v1 \
-LESSCODE_API_KEY=<baseten-api-key> \
-LESSCODE_SPARK_MODEL=<deployment-model-id> \
-LESSCODE_WONDER_MODEL=<deployment-model-id> \
-npm run review -- --repo <dir> --base <ref> --intent src/a.ts
-```
+| Field | Highest to lowest |
+| --- | --- |
+| Endpoint | Canonical role env → canonical shared env → trusted local provider → `META_API_BASE_URL` → code default. |
+| Key | Canonical role env → canonical shared env → trusted local `apiKeyEnv` value → `META_API_KEY` → `MODEL_API_KEY` → `META_AI_API_KEY`. |
+| Model | Canonical role env → `LESSCODE_MODEL` → `META_MODEL` → trusted local model → code default. |
 
-For a mirrored model, keep the mirror's model id in `LESSCODE_*_MODEL`; the manifest's `responseModels` records what the deployment returned.
+Legacy model precedence differs from legacy endpoint/key precedence. Prefer a single canonical configuration mode instead of relying on mixed legacy/file settings. Both roles resolve from an environment snapshot before the first model request.
 
-## Cost
+## Gateway compatibility
 
-When the provider reports `usage`, the manifest derives `cost` (USD) from per-model pricing: `pricing` in `.lesscode.json` (`inputPerMtok` / `outputPerMtok`, USD per 1M tokens) wins, then the built-in default table for `muse-spark-1.3` / `muse-wonder-1.0`. `renderRunSummary` prints the cost line only when a cost was derived. Cost is informational — it never passes or fails the gate.
+The built-in adapter sends:
 
-## Migrating from META_*
+- `POST <baseUrl>/chat/completions` with Bearer authorization and JSON content type.
+- `model`, `messages`, `tools`, and `tool_choice: "auto"` when tools are present. Spark uses `report_findings`; Wonder uses `propose_surgical_patch`, including structured factual claims in its review items.
+- Expected response fields: `choices`, tool-call arguments/content, and optional `model` and `usage`.
 
-See the migration table in the [README](../README.md#migrating-from-meta_-to-lesscode_).
+Transport redirects are rejected. Only 429/5xx are retried, at most twice with backoff; each attempt has a five-minute timeout. Wonder is still one planning/review call, not an extra model judge. Gate commands have their own timeouts.
+
+For OpenRouter, LiteLLM, Portkey or another gateway, verify that the specific deployment exposes this contract, preserves tools and accepts Bearer auth. Do not assume a vendor name or base URL supplies compatibility. The built-in protocol adds no vendor-specific routing headers. Header/routing requirements beyond this contract require an operator-owned gateway configuration or protocol adapter, not an invented environment variable.
+
+`ModelProtocol` separates encoding/decoding from retry/cancellation. A trusted host can pass `createModelClient('wonder', { protocol: hostProtocol })`, normalizing output to `ChatCompletionResult`. Native Anthropic/Gemini protocols are not built in, and a fetched config cannot select a protocol. The exported interfaces are at `lesscode/provider`.
+
+## Usage and cost
+
+`manifest.models` identifies requested roles; `manifest.responseModels` records served IDs when reported. Usage and cost have independent completeness. Missing prices or usage are not zero spend. Optional operator pricing is USD per million tokens (`inputPerMtok`, `outputPerMtok`); the default table is limited and not an authoritative provider price feed. Cost is informational, not a gate or hard spending cap. The live pilot has separate request/output bounds described in [Validation](validation.md).
+
+## Migration
+
+| Deprecated | Canonical |
+| --- | --- |
+| `META_API_KEY`, `MODEL_API_KEY`, `META_AI_API_KEY` | `LESSCODE_API_KEY` or role-specific keys |
+| `META_API_BASE_URL` | `LESSCODE_API_BASE_URL` or role-specific base URLs |
+| `META_MODEL` | `LESSCODE_MODEL` or role-specific model IDs |
+
+Aliases remain supported and warn once per alias. Canonical variables win in the corresponding environment selection. Service startup currently expects a shared `LESSCODE_API_KEY` (or its legacy `META_API_KEY` fallback), even when you also configure role-specific settings.
