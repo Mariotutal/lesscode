@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -57,6 +57,24 @@ describe("plan schema", () => {
 });
 
 describe("planOnce", () => {
+  it('counts removed diff context in the prompt budget before calling Wonder', async () => {
+    const d = dir({ 'src/a.ts': 'export const x = 1;\n' + '// old context\n'.repeat(1000) });
+    const before = process.env.LESSCODE_CONTEXT_WINDOW;
+    try {
+      await exec('git', ['init', '-q'], { cwd: d });
+      await exec('git', ['add', '.'], { cwd: d });
+      await exec('git', ['-c', 'user.name=Tests', '-c', 'user.email=tests@localhost', 'commit', '-qm', 'base'], { cwd: d });
+      writeFileSync(join(d, 'src/a.ts'), 'export const x = 2;\n');
+      process.env.LESSCODE_CONTEXT_WINDOW = '2000';
+      const client = stub([{ edits: [], review: [] }]);
+      await expect(planOnce({ checkoutDir: d, findings: [], files: ['src/a.ts'], changedFiles: ['src/a.ts'], baseRef: 'HEAD', client })).rejects.toThrow('exceeds');
+      expect(client.calls).toBe(0);
+    } finally {
+      if (before === undefined) delete process.env.LESSCODE_CONTEXT_WINDOW; else process.env.LESSCODE_CONTEXT_WINDOW = before;
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
   it("makes exactly one Wonder call and keeps a cited inline", async () => {
     const client = stub([{ edits: [{ findingIndex: 0, action: "inline", newFiles: [{ file: "src/use.ts", content: INLINED_USE }], deleteFiles: ["src/wrap.ts"], rationale: "inline forward" }] }]);
     const r = await planOnce({ checkoutDir: dir(FILES), findings: [WRAP], client });

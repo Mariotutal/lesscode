@@ -2,7 +2,7 @@ import { createModelClient, WONDER_MODEL } from "../provider/factory.js";
 import type { GuestClient, ToolDefinition } from "../provider/types.js";
 import type { Finding } from "../classify/schema.js";
 import type { ScopeCreepFinding } from "../classify/scopeCreep.js";
-import { assertFitsWindow, readCheckoutSources } from "../classify/checkout.js";
+import { assertFitsWindow, isTestFile, readCheckoutSources } from "../classify/checkout.js";
 import { isSealedPath } from "../classify/evidence.js";
 import { planOutputSchema, wonderOutputSchema, type PlannedEdit, type ReviewNoteItem } from "./schema.js";
 import { hashPrompt } from "../manifest.js";
@@ -137,7 +137,6 @@ export async function planOnce(opts: {
     ` citations=${f.citations.map((c) => `${c.file}:${c.startLine}-${c.endLine}`).join(",")} rationale=${f.rationale}`,
   ).join("\n");
 
-  assertFitsWindow("planner", client.config.model, numbered.length + findingsText.length + 2000);
   const planMessages = [
       {
         role: "system" as const,
@@ -150,11 +149,14 @@ export async function planOnce(opts: {
           "convention-break: action convention-fix with empty newFiles — code applies the mechanical fix.",
           "Refuse (skip) any finding whose code is load-bearing (transforms/unwraps/normalises) or not truly single-use/duplicate. When in doubt, skip.",
           "ALSO return `review`: the senior note, in the SAME response. The note covers only what a lead would say and a checker cannot prove: a boundary that hides the wrong concept (kind boundary), a name that disagrees with the concept already in the repository (name-mismatch), a test that does not lock the behaviour the change claims (test-gap), a load-bearing symbol that must stay (load-bearing), a practice this repository has not written in its convention registry (practice), or a question for the author (question). The change under review is the DIFF shown below; the full files are context only. Every note item must cite a line the diff changed, or state first that the change itself is sound before mentioning anything else. Do not write note items about other behaviour in a context file, or about files that only import a type from the changed file. Each item cites a line that exists. Set ordersEditForFinding only when the item orders an edit for a finding index. The note is never applied.",
+          "Ground each factual claim in the supplied evidence. A citation proves where code is, not what it does. Trace language operators, short-circuit conditions and reachable branches before describing a return value, exception, or side effect. Do not imply code was executed: no runtime observations are supplied here. Distinguish what the diff introduces from pre-existing code; if that distinction is not established, do not call it a new regression.",
+          "Before claiming a test gap, inspect the actual assertions and their data tables in the supplied tests, including equivalent literal spellings and parameterized cases. Cite the relevant test alongside the changed behavior when describing a specific gap. This is a bounded view: a missing context file does not establish absent repository coverage. If coverage cannot be established, ask a precise coverage question without asserting the test is missing. Questions must not smuggle in unverified consequences as facts. Omit unsupported claims; do not manufacture an issue to fill the note.",
           "Never edit tests. Never touch sealed paths (none are shown).",
         ].join("\n"),
       },
-      { role: "user" as const, content: `Findings:\n${findingsText}\n\nDiff of the change (the change under review):\n\n${diffText || "(no diff available)"}\n\nSurrounding files as context (numbered lines):\n\n${numbered}` },
+      { role: "user" as const, content: `Findings:\n${findingsText}\n\nDiff of the change (the change under review):\n\n${diffText || "(no diff available)"}\n\nTest context supplied (not a complete coverage inventory):\n${sources.filter((s) => isTestFile(s.file)).map((s) => s.file).join('\n') || '(no test files supplied; repository coverage is unknown)'}\n\nSurrounding files as context (numbered lines):\n\n${numbered}` },
   ];
+  assertFitsWindow('planner', client.config.model, JSON.stringify({ model: client.config.model, messages: planMessages, tools: [PLAN_TOOL_DEF], tool_choice: 'auto' }).length);
   const promptHash = hashPrompt(planMessages);
   const result = await client.chat({
     messages: planMessages,

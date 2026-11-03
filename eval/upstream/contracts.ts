@@ -34,7 +34,7 @@ const receiptSchema = z.object({
 }).strict();
 
 /** A complete record plus independent transport observations, never legacy flags. */
-export function assessRecord(input: unknown, c: UpstreamCase, adapter: Adapter, exitCode: number | null, receiptInput: unknown) {
+export function assessRecord(input: unknown, c: Pick<UpstreamCase, 'base' | 'head' | 'expectedVerdict'>, adapter: Adapter, exitCode: number | null, receiptInput: unknown) {
   const receipt = receiptSchema.parse(receiptInput);
   const record = runRecordSchema.parse(input);
   const manifest = z.object({

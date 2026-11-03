@@ -270,6 +270,19 @@ describe("LES-19 scoped review files", () => {
     expect(files).not.toContain("src/deep.ts"); // two hops away
     expect(files).not.toContain("src/legacy.js"); // unrelated
   });
+  it('includes explicitly requested JavaScript tests without enabling JavaScript checking', () => {
+    const dir = checkout({
+      'src/value.ts': 'export const value = 1;\n',
+      'tests/value.test.js': 'import {value} from "../src/value.js"; if(value !== 1) throw Error();\n',
+      'src/unrelated.js': 'export const unrelated = 2;\n',
+      'tsconfig.json': JSON.stringify({ compilerOptions: { allowJs: false, checkJs: false } }),
+    });
+    const selected = scopedReviewFiles(dir, { intentFiles: ['src/value.ts'], relatedTests: ['tests'] });
+    expect(selected).toContain('tests/value.test.js');
+    expect(selected).not.toContain('src/unrelated.js');
+    expect(readTsConfig(dir)).toEqual({ allowJs: false, checkJs: false });
+  });
+
   it("excludes JavaScript neighbours when allowJs is false, includes them when true; the change itself is always visible", () => {
     const mk = (allowJs: boolean) => checkout({ "src/a.ts": 'import { l } from "./legacy.js";\nexport const a = l;\n', "src/legacy.js": "export const l = 1;\n", "tsconfig.json": JSON.stringify({ compilerOptions: { allowJs } }) });
     expect(scopedReviewFiles(mk(false), { intentFiles: ["src/a.ts"] })).not.toContain("src/legacy.js");
