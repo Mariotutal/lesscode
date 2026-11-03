@@ -17,6 +17,9 @@ import type { PlannedEdit, ReviewNoteItem } from "../plan/schema.js";
 import { hashText, transactEdit } from "./transaction.js";
 import { changedPaths, fileText, git, openWorkspace, readGitFile } from "./workspace.js";
 import type { DecisionReason, EditOutcome, ReviewRequest, RunAudit, RunRecord } from "./types.js";
+import { collectReviewFacts } from '../review/factCatalog.js';
+import { verifyReviewItem } from '../review/verifyClaims.js';
+import type { ReviewFact } from '../review/claims.js';
 
 const emptyAudit = (): RunAudit => ({ droppedFindings: 0, recoveredFindings: [], registry: [], unknownConventions: [], refusedConventions: [], plan: { edits: 0, skipped: [], model: "", modelCalls: 0, review: [] }, reasons: [], tsConfig: { allowJs: false, checkJs: false } });
 const reason = (code: DecisionReason["code"], stage: DecisionReason["stage"], detail: string): DecisionReason => ({ code, stage, detail });
@@ -51,7 +54,7 @@ async function targetedSymbols(repo: string, head: string, edits: readonly EditO
   return targets;
 }
 
-function finalizeNote(record: RunRecord, texts: Map<string, string>, changedLines: Map<string, Set<number>>, intentChanged: boolean): void {
+function finalizeNote(record: RunRecord, texts: Map<string, string>, changedLines: Map<string, Set<number>>, intentChanged: boolean, facts: ReviewFact[]): void {
   const items: ReviewNoteItem[] = [];
   const cited = (item: ReviewNoteItem) => item.citations.every((c) => texts.has(c.file) && citationExistsInText(c, texts.get(c.file)!));
   for (const item of record.audit.plan.review) {
@@ -78,7 +81,19 @@ function finalizeNote(record: RunRecord, texts: Map<string, string>, changedLine
     const item: ReviewNoteItem = { kind: "practice", text: `Practice "${refused.convention}" is not applied: ${refused.rationale}`, citations: refused.citations };
     if (cited(item)) items.push(item);
   }
-  record.review = { items, markdown: items.length ? ["## Lead review", "", ...items.map((item) => `- (${item.kind}) ${item.text} [${item.citations.map((c) => `${c.file}:${c.startLine}-${c.endLine}`).join(", ")}]`), ""].join("\n") : "" };
+  const verifiedItems: ReviewNoteItem[] = [];
+  record.audit.reviewVerification = [];
+  for (const [itemIndex, item] of items.entries()) {
+    const result = verifyReviewItem(item, facts);
+    if (result.item) verifiedItems.push(result.item);
+    else {
+      record.audit.reviewVerification.push({ itemIndex, checks: result.checks, reason: result.reason! });
+      record.audit.reasons.push(`review item withheld: ${result.reason}`);
+    }
+  }
+  const verified = verifiedItems.filter((item) => item.verification?.status === 'verified').length;
+  record.review = { items: verifiedItems, facts, verification: { policyVersion: 1, verifiedItems: verified, unverifiedItems: verifiedItems.length - verified, withheldItems: items.length - verifiedItems.length },
+    markdown: verifiedItems.length ? ["## Lead review", "", ...verifiedItems.map((item) => `- (${item.kind}; ${item.verification?.status === 'verified' ? 'verified bounded facts' : 'unverified model advice'}) ${item.text} [${item.citations.map((c) => `${c.file}:${c.startLine}-${c.endLine}`).join(", ")}]`), ""].join("\n") : "" };
 }
 
 /** One owner of source identity, edit transactions, verification, and final evidence. */
@@ -100,6 +115,7 @@ export async function runReview(opts: ReviewRequest): Promise<RunRecord> {
   let stage = "resolve";
   let workspace: Awaited<ReturnType<typeof openWorkspace>> | undefined;
   const texts = new Map<string, string>();
+  let reviewFacts: ReviewFact[] = [];
   let changedLines = new Map<string, Set<number>>(), intentChanged = false;
   try {
     const trustedPolicy = loadTrustedPolicy(providerEnv);
@@ -150,8 +166,9 @@ export async function runReview(opts: ReviewRequest): Promise<RunRecord> {
       unknownConventions: classification.unknownConventions, refusedConventions: classification.refusedConventions.map((d) => ({ convention: d.finding.convention ?? "(none)", file: d.finding.file, citations: d.finding.citations, rationale: d.status === "refused" ? d.reason : d.finding.rationale })) });
     record.audit.reasons.push(...classification.scopeExemptions.map((e) => e.reason), ...classification.verificationDropped.map((d) => `finding for ${d.finding.file} kept out of the patch: ${d.reason}`), ...classification.unknownConventions.map((name) => `unknown convention "${name}" in lesscode-conventions.json: ignored`));
     stage = "plan";
+    reviewFacts = collectReviewFacts([...texts].map(([file, text]) => ({ file, text, lines: text.split('\n') })));
     const wonder = instrument(wonderClient, "wonder", manifest, opts.signal);
-    const plan = await manifest.time("plan", () => planOnce({ checkoutDir: repo, findings: record.findings, files: visible, changedFiles: changed, baseRef: base, client: wonder }));
+    const plan = await manifest.time("plan", () => planOnce({ checkoutDir: repo, findings: record.findings, files: visible, changedFiles: changed, baseRef: base, client: wonder, reviewFacts }));
     record.audit.plan = { edits: plan.edits.length, skipped: plan.skipped, model: plan.model, modelCalls: plan.modelCalls, usage: plan.usage, review: plan.review };
     for (const skip of plan.skipped) record.edits.push({ findingId: record.findingIds[skip.findingIndex] ?? `unknown-${skip.findingIndex}`, findingIndex: skip.findingIndex, action: "skip", status: "skipped", files: [], reason: reason("planner-skip", "plan", skip.reason) });
     const candidates: PlannedEdit[] = [...plan.edits];
@@ -232,7 +249,7 @@ export async function runReview(opts: ReviewRequest): Promise<RunRecord> {
     record.verification.status = "rejected";
     for (const edit of record.edits) if (edit.status === "kept") { edit.status = "withdrawn"; edit.reason = reason("verification-failed", "verification", record.failure.message); }
   } finally {
-    await manifest.time("finalize", async () => finalizeNote(record, texts, changedLines, intentChanged));
+    await manifest.time("finalize", async () => finalizeNote(record, texts, changedLines, intentChanged, reviewFacts));
     if (workspace) await manifest.time("cleanup", async () => workspace!.dispose());
     if (!opts.executor) await executor.dispose();
     record.execution.environmentId = executor.environmentId;

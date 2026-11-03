@@ -7,6 +7,8 @@ import { isSealedPath } from "../classify/evidence.js";
 import { planOutputSchema, wonderOutputSchema, type PlannedEdit, type ReviewNoteItem } from "./schema.js";
 import { hashPrompt } from "../manifest.js";
 import { buildSymbolGraph, importersOf } from "../gate/symbolGraph.js";
+import { collectReviewFacts } from '../review/factCatalog.js';
+import type { ReviewFact } from '../review/claims.js';
 
 export { WONDER_MODEL };
 const PLAN_TOOL = "propose_surgical_patch";
@@ -31,12 +33,16 @@ const PLAN_TOOL_DEF: ToolDefinition = {
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["kind", "text", "citations"],
+            required: ["kind", "text", "citations", "claims"],
             properties: {
               kind: { type: "string", enum: ["boundary", "name-mismatch", "test-gap", "load-bearing", "question", "practice"] },
               text: { type: "string" },
               citations: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false, required: ["file", "startLine", "endLine"], properties: { file: { type: "string" }, startLine: { type: "integer", minimum: 1 }, endLine: { type: "integer", minimum: 1 } } } },
               ordersEditForFinding: { type: "integer", minimum: 0 },
+              claims: { type: 'array', maxItems: 8, items: { type: 'object', additionalProperties: false, required: ['factId', 'assertion'], properties: {
+                factId: { type: 'string' }, assertion: { type: 'string', description: 'Copy the fact assertion, or explicitly assert an alternative to check (e.g. throws:ReferenceError versus returns:false; present versus absent).' },
+                value: { type: ['string', 'number', 'boolean', 'null'], description: 'Exact input literal for an assertion-inputs fact.' },
+              } } },
             },
           },
         },
@@ -117,9 +123,12 @@ export async function planOnce(opts: {
   changedFiles?: readonly string[];
   baseRef?: string;
   client?: GuestClient;
+  reviewFacts?: readonly ReviewFact[];
 }): Promise<PlanResult> {
   const client = opts.client ?? createModelClient("wonder");
   const sources = readCheckoutSources(opts.checkoutDir, opts.files);
+  const facts = opts.reviewFacts ?? collectReviewFacts(sources);
+  const factContext = facts.map(({ id, kind, file, startLine, endLine, symbol, assertion, inputs, values }) => ({ id, kind, file, startLine, endLine, symbol, assertion, inputs, values }));
   let diffText = "";
   if (opts.baseRef && opts.changedFiles?.length) {
     try {
@@ -150,9 +159,10 @@ export async function planOnce(opts: {
           "Refuse (skip) any finding whose code is load-bearing (transforms/unwraps/normalises) or not truly single-use/duplicate. When in doubt, skip.",
           "ALSO return `review`: the senior note, in the SAME response. The note covers only what a lead would say and a checker cannot prove: a boundary that hides the wrong concept (kind boundary), a name that disagrees with the concept already in the repository (name-mismatch), a test that does not lock the behaviour the change claims (test-gap), a load-bearing symbol that must stay (load-bearing), a practice this repository has not written in its convention registry (practice), or a question for the author (question). The change under review is the DIFF shown below; the full files are context only. Every note item must cite a line the diff changed, or state first that the change itself is sound before mentioning anything else. Do not write note items about other behaviour in a context file, or about files that only import a type from the changed file. Each item cites a line that exists. Set ordersEditForFinding only when the item orders an edit for a finding index. The note is never applied.",
           "Never edit tests. Never touch sealed paths (none are shown).",
+          "A code-derived fact catalog is supplied below. For factual statements about those facts, attach claims with factId and assertion (and the exact value for assertion-inputs). Claims are checked by code; contradicted or unsupported claims are withheld and verified sentences are rendered by code instead of your narrative. A claim refers only to the listed head-source inputs and assumptions, never to all inputs, runtime execution, full test coverage, or whether this change introduced behavior. Primitive traces assume undeclared globals absent and standard builtins unmodified. Assertion-inputs facts establish source presence only. Do not call an assertion absent if the listed input is present. Questions containing factual premises need claims too. Other advice/questions may use claims:[] and remain explicitly unverified. Never invent fact IDs or verification results.",
         ].join("\n"),
       },
-      { role: "user" as const, content: `Findings:\n${findingsText}\n\nDiff of the change (the change under review):\n\n${diffText || "(no diff available)"}\n\nSurrounding files as context (numbered lines):\n\n${numbered}` },
+      { role: "user" as const, content: `Findings:\n${findingsText}\n\nDiff of the change (the change under review):\n\n${diffText || "(no diff available)"}\n\nCode-derived facts (bounded scope, not model opinions):\n${JSON.stringify(factContext)}\n\nSurrounding files as context (numbered lines):\n\n${numbered}` },
   ];
   assertFitsWindow('planner', client.config.model, JSON.stringify({ model: client.config.model, messages: planMessages, tools: [PLAN_TOOL_DEF], tool_choice: 'auto' }).length);
   const promptHash = hashPrompt(planMessages);
