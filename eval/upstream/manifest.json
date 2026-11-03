@@ -1,0 +1,21 @@
+[
+  {
+    "id": "is-plain-obj-performance",
+    "repository": "https://github.com/sindresorhus/is-plain-obj.git",
+    "base": "c49ab092dcfd9bb5af5409cc3d6a1e5cbe443afe",
+    "head": "e334e11a580ba92662671e9386ea3b681f7750d2",
+    "license": {
+      "spdx": "MIT",
+      "path": "license",
+      "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+    },
+    "intent": ["index.js", "benchmark.js"],
+    "relatedTests": ["test.js", "index.test-d.ts"],
+    "expectedVerdict": "reviewed",
+    "rationale": "The upstream performance change retains the public predicate and adds a benchmark. The short prototype checks preserve cross-realm object recognition; the shared runLoop is used by both warmup and measurement. No known safe mechanical simplification warrants an applied patch. This expectation was recorded from source inspection before any model run; a mismatch requires human review, not relabeling the answer.",
+    "checks": [
+      { "command": "node", "args": ["--check", "index.js"] },
+      { "command": "npm", "args": ["test"] }
+    ]
+  }
+]
