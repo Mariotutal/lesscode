@@ -1,0 +1,2352 @@
+{
+  "generatedAt": "2026-11-02T23:35:07.557Z",
+  "mode": "invalid-legacy-evaluation",
+  "note": "Quarantined: synthetic inputs, scripted guest responses by default, copied MCP verdicts, and fabricated CLI records. Not evidence of 30 upstream projects, live model quality, or adapter parity. Original rows are retained for diagnosis only.",
+  "results": [
+    {
+      "id": "cli-micromark-util-combine-html",
+      "invocation": "cli",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-combine-html",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "2366cb8d15df466cf48b0592016448b4b9b8201f",
+      "actualHeadSha": "a86082c7c06f5e1207413a49df5965371aa7e7ef",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "cli-eventemitter3-once-wrapper",
+      "invocation": "cli",
+      "expected": "reviewed",
+      "bloatKind": "load-bearing-shared",
+      "sourceUrl": "https://github.com/primus/eventemitter3",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "f57e9e794728fef6f2338d8b95280e06e5e49d39",
+      "actualHeadSha": "47721e9e62d409fa1769b94ebd449c7a4fa7e568",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "mcp": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "cli": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ]
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "cli-is-number-duplicate",
+      "invocation": "cli",
+      "expected": "accepted",
+      "bloatKind": "duplicate-equivalent",
+      "sourceUrl": "https://github.com/micromatch/is-number",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "198f57d5d08e8a9ea015dd45a1cc25305dc38136",
+      "actualHeadSha": "3b6677f09aeb9463199fe9b3ef14aae26a5b07b0",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "mcp-micromark-util-decode-string",
+      "invocation": "mcp",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-decode-string",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "903a855f7b47bbfafa67ea011ca03826c139cf00",
+      "actualHeadSha": "e942c9581ed1bed331405d5b246cf950a79245a5",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "mcp-eventemitter3-emit-wrapper",
+      "invocation": "mcp",
+      "expected": "reviewed",
+      "bloatKind": "load-bearing-shared",
+      "sourceUrl": "https://github.com/primus/eventemitter3",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "a8fed6a8480ecacee507577cf06ab070674bfc3d",
+      "actualHeadSha": "fc9116b7c687218b35f1f46b773d955fb66151db",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "mcp": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "cli": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ]
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "mcp-p-queue-duplicate-not-equivalent",
+      "invocation": "mcp",
+      "expected": "reviewed",
+      "bloatKind": "duplicate-not-equivalent",
+      "sourceUrl": "https://github.com/sindresorhus/p-queue",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "9cac1b86cd3aab4ce252fe7f0ae9e6f5dd2e9f9a",
+      "actualHeadSha": "0abc7fcc8ef482e75800c3d1b23f9d7204254447",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "skill-micromark-util-normalize-identifier",
+      "invocation": "skill",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-normalize-identifier",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "5ec2a1cb2dfc58adc5856e2320155974752d707b",
+      "actualHeadSha": "b99494e29e2c7d6678605257e6d9830a3ce9856b",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "skill-eventemitter3-listeners-wrapper",
+      "invocation": "skill",
+      "expected": "reviewed",
+      "bloatKind": "load-bearing-shared",
+      "sourceUrl": "https://github.com/primus/eventemitter3",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "0205d69051cb29692ef528e5d0bfa807df4e8edb",
+      "actualHeadSha": "4e98a088000d533da8a6c62e4e62d227641ff5af",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "mcp": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "cli": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ]
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "skill-is-plain-obj-duplicate-equivalent",
+      "invocation": "skill",
+      "expected": "accepted",
+      "bloatKind": "duplicate-equivalent",
+      "sourceUrl": "https://github.com/sindresorhus/is-plain-obj",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "ce518f23a621ec0469e91508c58a18282773348a",
+      "actualHeadSha": "8e8d11fadd4d3bf3e39bcc9c0ea5272f4b256fc3",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "cli-nanoid-convention-registered",
+      "invocation": "cli",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/ai/nanoid",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "14878c3198e9b85f64ac4c31cef8220692fcc223",
+      "actualHeadSha": "f8f436f062a4211f0feda8453e239ef077e11eaf",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "mcp": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "cli": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ]
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "cli-chalk-allowjs-single-use",
+      "invocation": "cli",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/chalk/chalk",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "08d7cc4b261bc7e8ef743d7228411cbe9b008036",
+      "actualHeadSha": "510dcae6df2628d6958d4b494486ae94d214503d",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "cli-camelcase-checkjs-false-single-use",
+      "invocation": "cli",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/sindresorhus/camelcase",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "c590fbdf00bc8c97ea40ad6e279ad6ce31dc3464",
+      "actualHeadSha": "9e3c6417da1949498620719eda18ca143b685771",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "cli-indent-string-failed-baseline",
+      "invocation": "cli",
+      "expected": "reviewed",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/sindresorhus/indent-string",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "9df642f241123da3aa71d43d8a0c6b84156d74a3",
+      "actualHeadSha": "278736f8b27c515f19f0730a25030e8f6a8dd510",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "cli-strip-ansi-duplicate-equivalent",
+      "invocation": "cli",
+      "expected": "accepted",
+      "bloatKind": "duplicate-equivalent",
+      "sourceUrl": "https://github.com/chalk/strip-ansi",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "40123dad3b4a74aeca41549cd2f6dd5089ce44cc",
+      "actualHeadSha": "3e4b2e39de4bc99ef942b8a73aacb9bc8f41799c",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "cli-ansi-regex-duplicate-not-equivalent",
+      "invocation": "cli",
+      "expected": "reviewed",
+      "bloatKind": "duplicate-not-equivalent",
+      "sourceUrl": "https://github.com/chalk/ansi-regex",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "3303fbaf97dbaeaabb4cd2e3145c79fc9609e715",
+      "actualHeadSha": "50f3c4525b20c11340fc06a56bc8c2490b78dc72",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "cli-p-limit-scope-creep",
+      "invocation": "cli",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/sindresorhus/p-limit",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "d7ea8eadcefc880e03f93e590a103dd28d48ec4c",
+      "actualHeadSha": "b7577f14f63ad6190b5404b65b1da60f5a0e7333",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "mcp": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "cli": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ]
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "mcp-nanoid-convention-registered",
+      "invocation": "mcp",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/ai/nanoid",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "9e469f1d1363c09c22af9151032070866fe18342",
+      "actualHeadSha": "3abda893b75a7a1697a8ea692b7c19186ba75164",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "mcp": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "cli": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ]
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "mcp-chalk-allowjs-single-use",
+      "invocation": "mcp",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/chalk/chalk",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "b3e5ad806289126dcb8b20ec126c303bb6a48466",
+      "actualHeadSha": "2a2d7ab1b9199f6b7056624594cb77a1e5077f0a",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "mcp-camelcase-checkjs-false-single-use",
+      "invocation": "mcp",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/sindresorhus/camelcase",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "9a93a98656ca6eeb7ea0aea4070f3f6f764e4042",
+      "actualHeadSha": "a1e5eb71ab7e1c20128ecc97ae05450e34425b71",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "mcp-indent-string-failed-baseline",
+      "invocation": "mcp",
+      "expected": "reviewed",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/sindresorhus/indent-string",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "6bc6cdc0528ea7f38ca2454fecb38f48eb055368",
+      "actualHeadSha": "a7638ea4f067261b7d1f50ae3ebaf8e1e62e1b39",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "mcp-strip-ansi-duplicate-equivalent",
+      "invocation": "mcp",
+      "expected": "accepted",
+      "bloatKind": "duplicate-equivalent",
+      "sourceUrl": "https://github.com/chalk/strip-ansi",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "703135f8671193a277c7d4bd8e4a29b1b129d590",
+      "actualHeadSha": "3e4e37df5e56885ebea96889a24f0b4e7d4318e4",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "mcp-lodash-duplicate-not-equivalent",
+      "invocation": "mcp",
+      "expected": "reviewed",
+      "bloatKind": "duplicate-not-equivalent",
+      "sourceUrl": "https://github.com/lodash/lodash",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "2f452acd7e2aacd526dbc3f121b70f50dd42603b",
+      "actualHeadSha": "92f8f634b77353f61c73ed541c69971135424777",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "mcp-p-queue-scope-creep-lesscode-pr",
+      "invocation": "mcp",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/sindresorhus/p-queue",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "47f34488d5fb9091589ce503a23e2db90c3a8487",
+      "actualHeadSha": "58d2f1d5d064227049cad6316cea7db6fe1fc6ac",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "mcp": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "cli": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ]
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "skill-nanoid-convention-registered",
+      "invocation": "skill",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/ai/nanoid",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "8856f986b503ffb5b6c9df7f3975b7135cc39017",
+      "actualHeadSha": "1861b12d15ee59eaa9d11b4c287fc21665bc7799",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "mcp": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "cli": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ]
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "skill-chalk-allowjs-single-use",
+      "invocation": "skill",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/chalk/chalk",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "6de11833c604fc8f8b57b3e913283aeb0fce239e",
+      "actualHeadSha": "955b5d290994b872f41be7e4ea6766d3d8ffd623",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "skill-camelcase-checkjs-false-single-use",
+      "invocation": "skill",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/sindresorhus/camelcase",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "5da2df74098c906e38448d57d5c03cc46e46689e",
+      "actualHeadSha": "b4234a0f102bd721174fa74f11cbd0e06a693988",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "skill-indent-string-failed-baseline",
+      "invocation": "skill",
+      "expected": "reviewed",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/sindresorhus/indent-string",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "c2de2a7fa5be58fe0618836e05fb31b8f094109e",
+      "actualHeadSha": "9f1bea0d60fb654b70a92c46838581e979948098",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "skill-strip-ansi-lesscode-pr",
+      "invocation": "skill",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/chalk/strip-ansi",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "7cbfdf7ff5276f83e4aaa3ce48c64dd36b6d844d",
+      "actualHeadSha": "84d06b2e31ed2ad14e52d169c74f674ac1467b27",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": [
+          {
+            "name": "size-drops",
+            "passed": false
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "mcp": [
+          {
+            "name": "size-drops",
+            "passed": false
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "cli": [
+          {
+            "name": "size-drops",
+            "passed": false
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ]
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "skill-p-limit-duplicate-equivalent",
+      "invocation": "skill",
+      "expected": "accepted",
+      "bloatKind": "duplicate-equivalent",
+      "sourceUrl": "https://github.com/sindresorhus/p-limit",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "cff9dd1241404d12fa2ccab6f1439b2b0b62edd0",
+      "actualHeadSha": "70fb3e10076c11703a9eb705e5ea2778e5c70581",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": null,
+        "mcp": null,
+        "cli": null
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    },
+    {
+      "id": "skill-ansi-regex-scope-creep",
+      "invocation": "skill",
+      "expected": "accepted",
+      "bloatKind": "single-use-wrapper",
+      "sourceUrl": "https://github.com/chalk/ansi-regex",
+      "license": "MIT",
+      "baseShaPlaceholder": "0000000000000000000000000000000000000000",
+      "headShaPlaceholder": "1111111111111111111111111111111111111111",
+      "actualBaseSha": "be6286a49a4793c7f2bff7cf1730c73c4f575b81",
+      "actualHeadSha": "b55314a246104a7a9620b5ca7986a74dca6fddc7",
+      "verdicts": {
+        "guest": "reviewed",
+        "mcp": "reviewed",
+        "cli": "reviewed"
+      },
+      "gateChecks": {
+        "guest": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "mcp": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ],
+        "cli": [
+          {
+            "name": "size-drops",
+            "passed": true
+          },
+          {
+            "name": "cyclomatic-not-over-10pct",
+            "passed": true
+          },
+          {
+            "name": "exports-outside-edit-set-unchanged",
+            "passed": true
+          },
+          {
+            "name": "exports-inside-edit-set-targeted-only",
+            "passed": true
+          },
+          {
+            "name": "tests-not-deleted",
+            "passed": true
+          },
+          {
+            "name": "edit-covered-by-related-tests",
+            "passed": true
+          },
+          {
+            "name": "related-tests-pass",
+            "passed": false
+          },
+          {
+            "name": "tsc-passes",
+            "passed": false
+          },
+          {
+            "name": "eslint-touched-passes",
+            "passed": true
+          },
+          {
+            "name": "baseline-pre-existing-failures",
+            "passed": true
+          },
+          {
+            "name": "verified-tree-unchanged",
+            "passed": true
+          }
+        ]
+      },
+      "expectedMatched": {
+        "guest": false,
+        "mcp": false,
+        "cli": false
+      },
+      "envelopeOk": {
+        "guest": true,
+        "mcp": true,
+        "cli": true
+      },
+      "sealNeverRead": true
+    }
+  ],
+  "originalClaim": {
+    "mode": "live",
+    "note": "live run with real model via LESSCODE_API_KEY from .env; synthetic repos in mkdtemp; no fixtures/sealed read; gate coverage fixed via transitive caller tests"
+  },
+  "usableForReleaseDecision": false
+}

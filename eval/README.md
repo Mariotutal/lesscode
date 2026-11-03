@@ -1,5 +1,9 @@
 # Evaluation corpus (LES-27)
 
+The separate `live-corpus-30/` submission is quarantined. Its historical
+results are invalid and are not part of this corpus's evidence. See
+[the evidence review and replacement requirements](live-corpus-30/README.md).
+
 Eight fixtures prove the mechanics. This corpus measures, on cases
 beyond the fixtures, how often Spark reports a finding that is not
 there, misses one that is, and how often the gate accepts an edit a
