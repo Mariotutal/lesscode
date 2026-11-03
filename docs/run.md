@@ -1,75 +1,141 @@
-# Run
+# Run and use LessCode
 
-## Run a local checkout
+Complete [installation](install.md) and [provider setup](providers.md) first. Examples use the installed `lesscode` command; from a built source checkout, substitute `node /absolute/path/to/lesscode/bin/lesscode`.
 
-Use this for a repository you trust. Repository commands run on your machine, with API keys, npm user config, and loader hooks removed from that process.
+## Select the input
 
-```bash
-npm install
-LESSCODE_API_KEY=... npm run review -- --repo <dir> --base <ref> --intent src/a.ts,src/b.ts [--tests tests]
+The reviewed input is the target repository's **committed HEAD**, compared with `--base`. Uncommitted and untracked edits are not the review input. The engine creates a private snapshot and leaves the supplied checkout/branch unchanged.
+
+- `--repo`: absolute path to the target Git checkout.
+- `--base`: the actual comparison Git ref or immutable commit. `HEAD~1` works only when HEAD has a parent and that is the comparison you intend.
+- `--intent`: comma-separated files, directories or globs defining the intended scope. Quote globs to keep the shell from expanding them. Changed program source outside declared intent can be restored from base in the proposed patch; protected and non-behavior paths have separate rules.
+- `--tests`: comma-separated related test files/directories; the default is `tests`. Use paths your project's test command accepts. Explicitly requested JavaScript tests can be review context even with `allowJs` off; `checkJs` is not enabled by LessCode.
+- `--out`: result JSON destination, preferably outside the target checkout.
+
+## Trusted local review
+
+Ensure the target has its own dependencies installed. Local mode copies supplied dependencies into the private workspace; it does not install them for you.
+
+```sh
+lesscode review \
+  --repo /absolute/path/to/target \
+  --base HEAD~1 --intent 'src/a.ts,src/b.ts' --tests tests \
+  --out /absolute/path/to/results/review.json
 ```
 
-`--intent` is the files the change claimed to touch. `--tests` defaults to `tests`. `--execution docker` runs repository commands in a container instead; the image must already exist.
+Default execution is local and is appropriate only for source you trust. Repository-owned commands receive the executor's restricted environment rather than model/GitHub credentials, user npm config or loader hooks. Local execution is not a sandbox.
 
-```bash
-docker build -f docker/runner.Dockerfile -t lesscode-runner:local .
+## Isolated review
+
+Build the [runner image](install.md#prepare-docker-mode) first:
+
+```sh
+lesscode review \
+  --repo /absolute/path/to/target \
+  --base HEAD~1 --intent 'src/a.js' --tests test.js \
+  --execution docker --runner-image lesscode-runner:local \
+  --out /absolute/path/to/results/review.json
 ```
 
-The model endpoint defaults to `https://api.meta.ai/v1` but any OpenAI-compatible endpoint works. Set `LESSCODE_API_KEY` (canonical) and optionally `LESSCODE_API_BASE_URL`, `LESSCODE_SPARK_MODEL`, `LESSCODE_WONDER_MODEL`, or per-role `LESSCODE_SPARK_API_KEY`/`LESSCODE_WONDER_API_KEY`. Deprecated aliases `META_API_KEY`/`MODEL_API_KEY`/`META_AI_API_KEY`, `META_API_BASE_URL`, and `META_MODEL` still work and warn. Default Spark is `muse-spark-1.3` and Wonder is `muse-wonder-1.0`, selected by the engine for the single planning call.
+The image must already exist. The built-in installer supports npm (`npm ci` for a package lock, otherwise install without creating a lockfile), with install scripts disabled. The image is inspected and pinned to its ID; repository commands then run without network access. Missing images and unsupported package managers fail rather than falling back to local execution.
 
-## Per-repo config: `.lesscode.json`
+## Interpret the record
 
-A trusted local checkout can use `.lesscode.json` at its root (loader: `src/provider/configFile.ts`, zod-validated, cached, searched upward from the checkout; schema: `schemas/lesscode.schema.json`, referenced by `$schema`). It pins each role to a named provider without env mutation, e.g. Spark at Meta and Wonder via OpenRouter. Fetched pull-request checkouts cannot choose `baseUrl` or `apiKeyEnv`; they may only request an operator-approved alias when `LESSCODE_TRUSTED_POLICY` / `LESSCODE_TRUSTED_POLICY_FILE` is set (see [Providers](providers.md)).
+The installed CLI writes the `RunRecord` atomically to `--out`, creates parent directories and prints the result path. A setup/argument/output error may prevent a result file; inspect both exit status and the file.
 
-```json
-{
-  "$schema": "https://lesscode.dev/schemas/lesscode.schema.json",
-  "version": 1,
-  "providers": {
-    "meta": { "baseUrl": "https://api.meta.ai/v1", "apiKeyEnv": "META_API_KEY" },
-    "openrouter": { "baseUrl": "https://openrouter.ai/api/v1", "apiKeyEnv": "OPENROUTER_API_KEY" }
-  },
-  "models": {
-    "spark": { "provider": "meta", "model": "muse-spark-1.3" },
-    "wonder": { "provider": "openrouter", "model": "anthropic/claude-sonnet-4" }
-  },
-  "pricing": { "anthropic/claude-sonnet-4": { "inputPerMtok": 3, "outputPerMtok": 15 } }
-}
+| Verdict | Exit | Interpretation |
+| --- | ---: | --- |
+| `accepted` | 0 | A nonempty artifact passed the gate on the prepared tree. |
+| `reviewed` | 1 | Successful review without a patch; notes may be empty. |
+| `failed` | 2 | The run could not complete; inspect `state` and `failure`. |
+
+In a shell with `set -e`, handle exit 1 explicitly:
+
+```sh
+review_exit=0
+lesscode review --repo /absolute/path/to/target --base HEAD~1 \
+  --intent src/a.ts --out /absolute/path/to/results/review.json || review_exit=$?
+case "$review_exit" in
+  0|1) cat /absolute/path/to/results/review.json ;;
+  *) echo "LessCode failed (exit $review_exit)" >&2; (exit "$review_exit") ;;
+esac
 ```
 
-The file is commit-safe: providers name the env var holding the key (`apiKeyEnv`) only — a literal `apiKey` in the file is rejected, and errors redact secrets. Resolution order is explicit argument > `LESSCODE_*` env > operator-owned trusted policy > a `.lesscode.json` in a trusted operator cwd, or alias+model requests from an untrusted checkout when a trusted policy is present > hardcoded defaults (`muse-spark-1.3` / `muse-wonder-1.0`, `https://api.meta.ai/v1`). `pricing` is optional per-model USD per 1M tokens.
+Important fields:
+
+| Field | What to inspect |
+| --- | --- |
+| `revision` | Head/base SHA and declared/inferred scope; nullable on early failure. |
+| `artifact` | Accepted diff, SHA-256, verified tree and paths; null without a patch. |
+| `gate`, top-level `verification` | Patch checks and verification status, not review-note accuracy. |
+| `review.items[].verification` | Verified code-rendered bounded facts or unverified model advice. Missing metadata in older records means unknown verification. |
+| `review.facts` | Source hashes, exact inputs and assumptions supporting factual checks. |
+| `review.verification` | Verified, unverified and withheld note counts. |
+| `audit.reviewVerification` | Checks for withheld declared claims; not normal published notes. |
+| `manifest` | Requested/served models, usage, cost completeness and prompt hashes. |
+| `state`, `failure`, `edits` | Execution failure and why edits were kept, skipped, rejected or withdrawn. |
+
+A valid citation proves a location, not the statement's meaning. Verified fact text is rendered by code; contradicted or unsupported declared factual items are withheld. Other advice/questions remain explicitly unverified. Read [factual verification](factual-review-verification.md) before treating an item as established behavior. Presence of assertion source is not complete coverage proof, and a passing patch gate is not semantic-equivalence proof.
+
+## Inspect and apply a patch
+
+LessCode returns patch text; it does not apply it to your branch. Review the artifact and confirm your checkout still matches the recorded head. If you choose to apply it, write `artifact.patch` to a patch file, run `git apply --check /path/to/patch.diff` from the target, and apply it with your normal review workflow. Do not apply `review.items[].text` as code.
+
+## Development command versus installed command
+
+`lesscode review` and `lesscode tool` are the same canonical file-output interface. They require `--out`.
+
+For a built source checkout, the development review entry prints the canonical JSON to stdout and a summary to stderr:
+
+```sh
+node dist/review/cli.js --repo /absolute/path/to/target \
+  --base HEAD~1 --intent src/a.ts > /absolute/path/to/results/review.json
+```
+
+`npm run review -- ...` invokes its TypeScript equivalent; npm may add banners to stdout. Use `npm run --silent review -- ...` or the direct built entry if capturing JSON. The legacy [simplify interfaces](simplify-tool.md) have different output and verdict names; do not substitute them in a canonical-record parser.
 
 ## Review a GitHub pull request
 
-This fetches the pull request head and base by commit, derives the intent from the changed source files, and runs the same engine. Repository commands run in the runner image above. A `lesscode-pr.json` at the head (`baseRef`, `intent`, optional `relatedTests`) overrides that derived intent when its `baseRef` matches the pull request.
+From a source checkout, configure model credentials and `GITHUB_TOKEN` (or `GH_TOKEN`), then:
 
-```bash
-GITHUB_TOKEN=... npm run github-pr-review -- --owner <owner> --repo-name <repo> --pr <n> [--offer none|branch|suggestions]
+```sh
+export LESSCODE_RUNNER_IMAGE=lesscode-runner:local
+npm run github-pr-review -- --owner OWNER --repo-name REPOSITORY --pr 123 --offer none
 ```
 
-`--offer` defaults to `none`. The command posts one Check Run named `lesscode/review` and one comment marked `<!-- lesscode:review-note -->`. `branch` pushes the verified patch to a new suggestion branch. `suggestions` posts it as review suggestions. The pull-request branch is never modified, and the pull request is never merged. `--checkout <dir>` uses a local tree that already contains `lesscode-pr.json` and matches the pull request head.
+This command **publishes** a `lesscode/review` Check Run and a marked issue comment. `--offer none` disables patch offers, not those posts. The token must authorize those GitHub operations and repository access. `branch` creates a separate suggestion branch; `suggestions` posts review suggestions. It never updates the PR branch or merges.
 
-## Run the hosted service
+Without `--checkout`, the command fetches immutable PR revisions, derives scope from changed source, and uses Docker with no local fallback. An optional `lesscode-pr.json` (`baseRef`, `intent`, optional `relatedTests`) can override inferred scope only when its base resolves to the actual PR base. Its endpoint/credential settings never gain authority. The command refuses a moved PR head before publication.
 
-The service accepts a job and returns the same record. It does not post to GitHub. The body is only `owner`, `repo`, `prNumber`, and `expectedHeadSha`. A bearer token and an `owner/repo` allowlist are required.
+`--checkout /path` instead selects a trusted local checkout matching the PR head and containing the declaration. Use that only for source you trust. For queued, non-publishing GitHub review, use the [hosted API](hosted-deployment.md); its artifact is a GitHub outcome envelope containing the canonical record at `run`.
 
-```bash
-LESSCODE_SERVICE_TOKEN=... \
-LESSCODE_RUNNER_IMAGE=lesscode-runner:local \
-LESSCODE_ALLOWED_REPOS=owner/repo \
-GITHUB_TOKEN=... \
-LESSCODE_API_KEY=... \
-npm run service
-```
+## Troubleshooting
 
-It listens on `127.0.0.1:8787` unless `LESSCODE_HOST` and `LESSCODE_PORT` say otherwise. `POST /reviews` queues the job. `GET /reviews/<id>` returns its state, and `GET /reviews/<id>/artifact` returns the record when the job has completed.
+| Symptom | Check |
+| --- | --- |
+| Command missing or stale | Follow [install/update](install.md); confirm PATH and rebuild `dist/`. Restart the agent/server. |
+| Missing model key or 401 | The control process needs the correct provider key; `.env` is not auto-loaded. Check the provider/model binding without printing the key. |
+| Reviewed exit 1 | Normal note-only/no-patch result; inspect JSON rather than treating it as a crash. |
+| Base/HEAD resolution error | Commit the change and choose a valid base present in the target checkout. |
+| Docker/image/package-manager failure | Verify the daemon, approved image and npm compatibility; there is no local fallback. |
+| No applicable patch | Inspect edit reasons/gate, supported transforms, related-test paths and pre-existing test failures. A note-only result is valid. |
+| Unknown cost or missing served model | Inspect usage/model fields and cost completeness; missing price/usage is not zero cost. |
+| Notes withheld or unverified | Inspect factual checks and assumptions; this is not a verified claim about complete behavior. |
+| Prompt too large | Narrow the review scope or use a supported context configuration; the planner counts the full request before calling a model. |
 
-## Tests
+## Developer diagnostics
 
-```bash
-npm test
-npm run typecheck
-npm run lint
-```
+The source checkout also has lower-level and compatibility entrypoints. Use each built entry's `--help` for its exact arguments; these are not the installed CLI's `review|tool --out` contract.
 
-Scripted tests stub the model. A live eval of the corpus is recorded in [docs/eval-live-runs.md](eval-live-runs.md). The agent-facing `simplify` contract is [docs/simplify-tool.md](simplify-tool.md).
+| Built entry | Purpose |
+| --- | --- |
+| `node dist/classify/cli.js --help` | Classification diagnostics; ordinary execution can call Spark and inspect executable project configuration. |
+| `node dist/plan/cli.js --help` | Legacy pipeline view; retains `--gate-base` compatibility arguments. |
+| `node dist/simplify/cli.js --help` | Legacy accepted/refused patch-only view. |
+| `node dist/tool/cli.js --help` | Legacy function-calling simplify adapter. |
+| `node dist/gate/cli.js --help` | Direct gate diagnostics; no models, but repository commands execute on the supplied tree. |
+| `node dist/pr/cli.js --help` | Local PR-declaration/check-and-comment projection. |
+| `node dist/pr/githubCli.js --help` | GitHub publishing CLI. |
+| `node dist/review/cli.js --help` | Development canonical JSON stdout adapter. |
+
+The help calls do not perform a review. Lower-level diagnostics are for source you trust and do not all provide the engine's private-snapshot guarantee. Prefer the main isolated review path for untrusted repositories. Development history explains earlier designs, not current command syntax.

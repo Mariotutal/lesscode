@@ -1,6 +1,6 @@
 # Load a pull request, then review it
 
-This spec described `master` at `bee7949`, before the review engine. The load step it proposed shipped in pull request 25 and is now [architecture.md](architecture.md). The page below is the proposal as it was written, not the current behavior.
+**Archived proposal.** This spec described `master` at `bee7949`, before the current review engine. All uses of “current” or “today” below refer to that snapshot. The proposed source loader shipped; current installation and operation are in [Install](install.md), [Run](run.md) and [Architecture](architecture.md). Later bounded factual verification is described [separately](factual-review-verification.md). The original design and examples below are retained as history, not instructions for today's installation.
 
 LessCode reviews one JavaScript or TypeScript change. This document records how a run works today, which file owns which job, and the one change that lets a pull request run without `lesscode-pr.json`.
 

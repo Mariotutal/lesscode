@@ -1,6 +1,6 @@
 ---
 name: lesscode
-description: Run LessCode review or simplify-tool on the current checkout and return the JSON result path without inventing a verdict.
+description: Run the installed LessCode review command for a committed change and return its JSON result path and recorded verdict.
 compatibility: Requires Node.js 22+, Git and a built LessCode installation on PATH. Docker mode requires an approved runner image.
 allowed-tools: Read Bash
 ---
@@ -20,3 +20,5 @@ Use this skill to run LessCode from an agent. Do not invent a verdict — read t
 ## References
 
 - Run `lesscode --help` for the installed command contract. This skill can be copied independently and depends on the installed executable.
+- If the command is missing or stale, follow the [source/tarball installation guide](https://github.com/Mariotutal/lesscode/blob/master/docs/install.md). It is not a published npm-registry package.
+- For MCP registration rather than CLI skill execution, use the [consumer guide](https://github.com/Mariotutal/lesscode/blob/master/docs/consumers.md); client config and skill-discovery locations are host-specific.

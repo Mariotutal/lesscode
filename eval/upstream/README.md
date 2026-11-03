@@ -1,5 +1,7 @@
 # Pinned upstream pilot
 
+For installation, provider setup and the complete evidence map, start with the [current validation guide](../../docs/validation.md). This directory records a small selected pilot, not a release-wide accuracy guarantee.
+
 This is a new evaluator, separate from the quarantined `live-corpus-30`.
 The initial manifest contains **two actual upstream changes**, including the
 [is-plain-obj performance PR](https://github.com/sindresorhus/is-plain-obj/pull/16).

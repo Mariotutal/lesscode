@@ -1,5 +1,7 @@
 # Factual review verification
 
+Start with [Install](install.md), [Run](run.md#interpret-the-record) or [Consumers](consumers.md) for setup and field usage. This page defines the verification guarantee and its limits; [Validation](validation.md) separates dated evidence from current capabilities.
+
 LessCode verifies a bounded set of structured factual claims in the shared
 engine. MCP, the CLI, the portable skill and hosted callers receive the
 same canonical result. Patch acceptance and factual review verification
@@ -110,6 +112,6 @@ quality, absence of bugs, or factual correctness of unstructured advice.
 It has no second model judge and makes no additional Wonder call.
 
 The live diagnostic controls and pinned upstream repeat are recorded in
-the repository's `eval/upstream/factual-verification-results.md`. A useful
+[the repository's recorded results](https://github.com/Mariotutal/lesscode/blob/master/eval/upstream/factual-verification-results.md). A useful
 ReferenceError finding must survive verification; simply suppressing all
 notes would not establish accuracy.

@@ -1,5 +1,7 @@
 # Review accuracy check — 2026-11-03
 
+This is a dated observation from the named implementation revision. The later [factual verification results](factual-verification-results.md) and [current validation guide](../../docs/validation.md) describe subsequent work; the measurements below remain unchanged.
+
 ## Result: factual accuracy is not established
 
 MCP and the CLI share the same review engine. Their successful execution

@@ -1,6 +1,12 @@
 # Development log
 
-This is the ticket-by-ticket record of how LessCode was built, through the GitHub posting work. The current behavior is the [README](../README.md) and [architecture](architecture.md). Where this log disagrees with those, those describe the engine that shipped: one `runReview`, no model-written bytes, and no patch when verification changes the tree or the repository tests were already failing.
+This is a **historical implementation log**, not the install/use guide. Older commands, model defaults, output descriptions and test counts below describe their original stage. Current behavior is in [Install](install.md), [Run](run.md), [Architecture](architecture.md) and [Validation](validation.md).
+
+## Current checkpoint — 2026-11-03
+
+The shipped system has one review engine and canonical RunRecord, a built file-output CLI, a portable skill, official SDK MCP transports, an immutable GitHub loader and a private job API/worker topology. The latest bounded factual verifier publishes code-rendered supported facts, withholds unsupported/contradicted declared claims, and labels other advice unverified. See [factual verification](factual-review-verification.md).
+
+Historical corpus tables and withdrawn audit results are not retroactively upgraded to this contract. Use the current guides for canonical credentials, Baseten hackathon model selection, execution isolation and factual-result interpretation.
 
 ## Gate (LES-2, no model)
 

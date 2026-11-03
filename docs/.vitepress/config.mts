@@ -5,25 +5,46 @@ export default withMermaid(
   defineConfig({
     title: 'LessCode',
     description:
-      'LessCode reviews a JavaScript or TypeScript change and returns two things: a cited note, and a patch only when the checks still match that edit.',
+      'Install and use the shared review engine, MCP, portable skill and private workers. Interpret patch gates and bounded factual verification separately.',
     base: '/lesscode/',
-    // docs/development.md links to the repo README at ../README.md, outside the docs root.
-    ignoreDeadLinks: [/README/],
     themeConfig: {
       nav: [
         { text: 'Home', link: '/' },
-        { text: 'Run', link: '/run' },
+        { text: 'Install', link: '/install' },
+        { text: 'Use', link: '/run' },
+        { text: 'Integrate', link: '/consumers' },
         { text: 'Architecture', link: '/architecture' },
         { text: 'Providers', link: '/providers' },
-        { text: 'Measurements', link: '/eval-live-runs' },
-        { text: 'Consumers', link: '/consumers' },
+        { text: 'Validation', link: '/validation' },
       ],
       sidebar: [
         {
-          text: 'More',
+          text: 'Get started',
           items: [
-            { text: 'Simplify tool', link: '/simplify-tool' },
+            { text: 'Install, update and uninstall', link: '/install' },
+            { text: 'Run and interpret results', link: '/run' },
+            { text: 'Providers and credentials', link: '/providers' },
+            { text: 'MCP and portable skills', link: '/consumers' },
+          ],
+        },
+        {
+          text: 'Operate and understand',
+          items: [
+            { text: 'Architecture', link: '/architecture' },
+            { text: 'Factual verification', link: '/factual-review-verification' },
+            { text: 'Validation and limits', link: '/validation' },
+            { text: 'Private hosted deployment', link: '/hosted-deployment' },
+            { text: 'Hardening roadmap', link: '/architecture-hardening-plan' },
+            { text: 'Legacy simplify interfaces', link: '/simplify-tool' },
+          ],
+        },
+        {
+          text: 'History and evidence',
+          items: [
+            { text: 'Historical live measurements', link: '/eval-live-runs' },
             { text: 'Development log', link: '/development' },
+            { text: 'Original PR load proposal', link: '/pull-request-load-spec' },
+            { text: 'Withdrawn external audit', link: '/external-audit-findings' },
           ],
         },
       ],

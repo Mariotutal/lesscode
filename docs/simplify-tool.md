@@ -1,67 +1,37 @@
-# The `simplify` tool contract
+# Legacy simplify interfaces
 
-One tool another agent can call to run the same review as
-`simplify(checkout, base, intent)`. The handler validates the arguments
-and forwards them to `simplify` (`src/simplify/simplify.ts`), which is a
-patch-only view of `runReview`. The engine's gate decides, and the
-calling agent does not re-decide the verdict. The run itself is
-described in [architecture.md](architecture.md).
+`simplify` is the compatibility patch-only projection of the shared `runReview` engine. Use canonical `review_change` or the installed `lesscode review|tool` command when you need the complete note and factual-verification metadata. See [Consumers](consumers.md).
 
-`review_change` (`src/tool/reviewTool.ts`) takes the same arguments and
-returns the `RunRecord` directly. The host chooses local or container
-execution. The model does not.
+## Interfaces are distinct
 
-- Definition: `SIMPLIFY_TOOL_DEF` in `src/tool/tool.ts` (a
-  function-calling tool definition, `{ type: "function", function: { name: "simplify", description, parameters } }`).
-- Handler: `simplifyTool.call(args)` in `src/tool/tool.ts`;
-  `createSimplifyTool()` builds a fresh instance.
-- Argument validation: `simplifyToolArgumentsSchema` in
-  `src/tool/schema.ts` (zod). Invalid arguments throw before any run.
-- CLI adapter: `src/tool/cli.ts` (`npm run simplify-tool`), a thin
-  adapter over the tool, not over the pipeline directly.
+| Interface | Result/output |
+| --- | --- |
+| `lesscode review` or `lesscode tool` | Canonical `RunRecord` written to required `--out`; stdout is the file path. Both names run the same public CLI flow. |
+| MCP `review_change` | Canonical `RunRecord` in tool `structuredContent`. |
+| Source-level function-calling `createReviewTool()` | Canonical `RunRecord`; not itself an MCP wire server. |
+| `simplify()` / `simplifyTool.call()` | Legacy `SimplifyResult`: accepted/refused, patch and audit views. |
+| `npm run simplify-tool` | Development adapter for the legacy simplify result; can also print its human summary. Do not parse all stdout as a canonical record. |
+
+The official MCP server registers `review_change`, not a separate legacy `simplify` MCP tool. The function-calling definitions in `src/tool/` are library integrations, not interchangeable transport implementations.
 
 ## Arguments
 
-| Argument       | Type       | Required | Meaning                                                                 |
-| -------------- | ---------- | -------- | ----------------------------------------------------------------------- |
-| `checkout`     | `string`   | yes      | Path to the PR checkout — a git working tree whose HEAD is the PR head. Never modified by the run. |
-| `base`         | `string`   | yes      | Git ref the PR is diffed against (the PR's base).                        |
-| `intent`       | `string[]` | yes      | Non-empty list of files the change claimed to touch. Any other changed file is scope creep and is restored from `base` by code. |
-| `relatedTests` | `string[]` | no       | Related test files/dirs the gate runs. Defaults to `["tests"]` inside `simplify`. |
+| Argument | Required | Meaning |
+| --- | --- | --- |
+| `checkout` | yes | Git checkout whose committed HEAD is reviewed. |
+| `base` | yes | Actual comparison ref/commit. |
+| `intent` | yes | Nonempty array of intended files/directories/globs. Scope-creep rules are code-owned. |
+| `relatedTests` | no | Related test paths; defaults to `tests`. |
 
-## Result
+These arguments carry source identity only. The trusted host selects clients, executor and cancellation. A programmatic integration must choose an isolated executor for source it does not trust; the legacy development CLI is a trusted-local path.
 
-The tool returns the `SimplifyResult` unchanged. The fields a caller
-acts on:
+## Legacy result
 
-- `verdict` — exactly two values:
-  - `"accepted"`: the gate accepted the cumulative kept edits; `patch`
-    holds the resulting unified diff.
-  - `"refused"`: nothing was kept (no applicable findings, the planner
-    skipped everything, or the gate rejected). `patch` is `""`.
-- `patch` — unified diff of the kept edits vs the checkout HEAD, taken
-  from `git diff`; its line count comes from git, never the model.
-  Empty when the verdict is `refused`.
-- `findings` — the closed finding set: `single-use-abstraction`
-  (inline), `duplicate-helper` (retarget to the existing helper),
-  `scope-creep` (code-decided from the diff vs `intent`, restored from
-  `base` by code), and `convention-break` (mechanical fix or refusal).
-- `gate` — the deterministic gate result (`{ accepted, checks, metrics, exitCodes }`),
-  or `null` when no edit reached the gate. On an accepted run the gate ran
-  the related tests, `tsc`, and ESLint, verified exports outside the
-  edit set are unchanged, the code-line size dropped, no changed
-  function's cyclomatic complexity rose more than 10%, and no test was
-  deleted.
+- `accepted` means a nonempty accepted `patch` exists.
+- `refused` means no patch survives; `patch` is empty. This can be a legitimate no-change/unsupported-transform outcome.
+- `findings`, `gate`, `plan`, `apply`, `reasons`, registry and manifest fields explain decisions. Raw `plan.review` is diagnostic planner text, not a verified final senior note.
+- A failed engine run can throw through this compatibility function; CLI failure exits 2. The ordinary simplify exits are 0 accepted and 1 refused.
 
-The result also carries audit fields (`droppedFindings`, `plan`,
-`apply`, `reasons`) from the run; they explain the verdict, they do not
-re-open it.
+The compatibility projection does not expose the full finalized `review.facts` and per-item verification contract. Do not infer factual accuracy from its plan audit. Use `runReview` or `review` when that matters.
 
-## Branch rule
-
-A run never modifies the caller checkout or branch: every edit is
-applied and gated in a scratch worktree that is removed afterwards,
-and the patch is returned as text for the caller to apply as it sees
-fit. Therefore **a refused run leaves the caller branch unchanged** —
-HEAD and file contents are exactly what they were before the call
-(this includes accepted runs: the checkout is untouched either way).
+All real edits are prepared in a private workspace and returned as patch text. Accepted and refused runs both leave the caller checkout/branch unchanged. A gate-rejected edit is not retried as an arbitrary model-written replacement.

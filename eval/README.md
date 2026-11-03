@@ -6,10 +6,7 @@ results are invalid and are not part of this corpus's evidence. See
 The replacement [pinned upstream pilot](upstream/README.md) has separate
 baseline-only and explicitly enabled live modes.
 
-Eight fixtures prove the mechanics. This corpus measures, on cases
-beyond the fixtures, how often Spark reports a finding that is not
-there, misses one that is, and how often the gate accepts an edit a
-human would reject.
+The maintained corpus has ten synthetic cases beyond the original fixtures. Scripted runs check known-answer mechanics; live runs observe a selected model configuration. Neither establishes broad upstream accuracy. Current commands and evidence distinctions are in [the validation guide](../docs/validation.md).
 
 - `cases/<id>/{base,head}/` — new synthetic checkouts with known
   answers. No case reads, copies, or references any
@@ -25,7 +22,7 @@ human would reject.
   (reported − kept), precision and recall over kept vs known
   answers, gate verdict vs expected verdict, model calls, tokens,
   and time. `renderScoreTable` prints the table.
-- `mutate.ts` — gate mutations: take an accepted patch, change one
+- `tests/eval.test.ts` — gate mutations: take an accepted patch, change one
   behaviour the tests do not cover, and state which check, if any,
   catches it. A mutation no check catches is printed as
   `NO CHECK CAUGHT THIS MUTATION`, plainly.
@@ -40,12 +37,12 @@ Scripted (in `npm test`, no live model):
 npx vitest run tests/eval.test.ts --pool=forks --poolOptions.forks.singleFork
 ```
 
-Live (real Spark + Wonder; appends a dated section with model
+After supplying canonical operator credentials and model configuration, live (real Spark + Wonder; appends a dated section with model
 identifiers to `docs/eval-live-runs.md`, so a model change shows up
 as a diff in the numbers):
 
 ```bash
-MODEL_API_KEY=... npx tsx eval/run-live.ts
+node --import tsx eval/run-live.ts
 ```
 
 The cases: `inline-basic` (true wrapper), `load-bearing-wrapper`
