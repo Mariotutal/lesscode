@@ -7,7 +7,7 @@ third-party dependency licenses remain separate.
 ## Requirements
 
 - Node.js **22 or later**, npm and Git available to the process running LessCode.
-- A model provider with the required tool-capable OpenAI Chat Completions interface; see [provider setup](providers.md).
+- A model provider with a tool-capable OpenAI Chat Completions or Anthropic Messages interface; see [provider setup](providers.md).
 - Docker CLI and a running Docker engine for isolated execution, fetched GitHub reviews or hosted workers. Trusted local mode can run without Docker.
 - An npm-based target project for the built-in Docker dependency installer. Other package managers require a compatible executor; setting a base URL does not add that support.
 
