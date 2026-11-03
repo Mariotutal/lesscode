@@ -143,7 +143,8 @@ export function scopedReviewFiles(
   const tests = (opts.relatedTests ?? []).flatMap((t) =>
     all.filter((f) => f === t || f.startsWith(t.endsWith("/") ? t : `${t}/`)),
   );
-  for (const t of tests) push(t);
+  // Explicit test context is evidence, independent of the compiler's JS settings.
+  for (const t of tests) push(t, true);
   if (!opts.relatedTests?.length) {
     for (const f of all) if (isTestFile(f) && importsAny(checkoutDir, f, seeds)) push(f);
   }

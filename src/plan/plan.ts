@@ -137,7 +137,6 @@ export async function planOnce(opts: {
     ` citations=${f.citations.map((c) => `${c.file}:${c.startLine}-${c.endLine}`).join(",")} rationale=${f.rationale}`,
   ).join("\n");
 
-  assertFitsWindow("planner", client.config.model, numbered.length + findingsText.length + 2000);
   const planMessages = [
       {
         role: "system" as const,
@@ -155,6 +154,7 @@ export async function planOnce(opts: {
       },
       { role: "user" as const, content: `Findings:\n${findingsText}\n\nDiff of the change (the change under review):\n\n${diffText || "(no diff available)"}\n\nSurrounding files as context (numbered lines):\n\n${numbered}` },
   ];
+  assertFitsWindow('planner', client.config.model, JSON.stringify({ model: client.config.model, messages: planMessages, tools: [PLAN_TOOL_DEF], tool_choice: 'auto' }).length);
   const promptHash = hashPrompt(planMessages);
   const result = await client.chat({
     messages: planMessages,
