@@ -1,13 +1,16 @@
-import type { FetchLike, ModelClient, ModelRole, ProviderConfig } from "./types.js";
+import { EFFORT_LEVELS, PROTOCOL_IDS, type EffortLevel, type FetchLike, type ModelClient, type ModelRole, type ProtocolId, type ProviderConfig } from "./types.js";
 import { loadLesscodeConfig, redactSecrets, type LesscodeConfig } from "./configFile.js";
 import { loadTrustedPolicy, resolveFromTrustedPolicy, type TrustedPolicy } from "./policy.js";
 import { openAiChatProtocol, type ModelProtocol } from './protocol.js';
+import { createAnthropicClient } from './anthropic.js';
 
 export const DEFAULT_API_BASE_URL = "https://api.meta.ai/v1";
 export const META_API_BASE = DEFAULT_API_BASE_URL;
 export const SPARK_MODEL = "muse-spark-1.3";
 export const WONDER_MODEL = "muse-wonder-1.0";
 export const DEFAULT_MODELS: Record<ModelRole, string> = { spark: SPARK_MODEL, wonder: WONDER_MODEL };
+export const ANTHROPIC_API_BASE_URL = "https://api.anthropic.com";
+export const ANTHROPIC_DEFAULT_MODEL = "claude-opus-5-5";
 
 /** Every command the gate or this model client starts gets a timeout. */
 export const DEFAULT_MODEL_TIMEOUT_MS = 300_000;
@@ -49,6 +52,20 @@ function pick(env: NodeJS.ProcessEnv, names: string[], warn?: (msg: string) => v
   return undefined;
 }
 
+function pickProtocol(env: NodeJS.ProcessEnv, roleUpper: string): ProtocolId | undefined {
+  const value = pick(env, [`LESSCODE_${roleUpper}_PROTOCOL`, "LESSCODE_PROTOCOL"]);
+  if (value === undefined) return undefined;
+  if (!(PROTOCOL_IDS as readonly string[]).includes(value)) throw new Error(`unknown model protocol "${value}"; expected one of ${PROTOCOL_IDS.join(", ")}`);
+  return value as ProtocolId;
+}
+
+function pickEffort(env: NodeJS.ProcessEnv, roleUpper: string): EffortLevel | undefined {
+  const value = pick(env, [`LESSCODE_${roleUpper}_EFFORT`, "LESSCODE_EFFORT"]);
+  if (value === undefined) return undefined;
+  if (!(EFFORT_LEVELS as readonly string[]).includes(value)) throw new Error(`unknown effort "${value}"; expected one of ${EFFORT_LEVELS.join(", ")}`);
+  return value as EffortLevel;
+}
+
 export interface ResolveProviderOptions {
   warn?: (msg: string) => void;
   /** Repo root to search for `.lesscode.json` — only use with trusted checkouts. */
@@ -78,12 +95,17 @@ export function resolveProviderConfig(
 ): ProviderConfig {
   const warn = opts?.warn;
   const roleUpper = role.toUpperCase() as "SPARK" | "WONDER";
+  const effort = opts?.explicit?.effort ?? pickEffort(env, roleUpper);
+  const withEffort = effort ? { effort } : {};
   if (opts?.explicit?.baseUrl && opts?.explicit?.apiKey) {
+    const protocol = opts.explicit.protocol ?? pickProtocol(env, roleUpper);
     return {
       baseUrl: opts.explicit.baseUrl.replace(/\/+$/, ""),
       apiKey: opts.explicit.apiKey,
-      model: opts.explicit.model ?? pick(env, [`LESSCODE_${roleUpper}_MODEL`, "LESSCODE_MODEL", "META_MODEL"], warn) ?? DEFAULT_MODELS[role],
+      model: opts.explicit.model ?? pick(env, [`LESSCODE_${roleUpper}_MODEL`, "LESSCODE_MODEL", "META_MODEL"], warn) ?? (protocol === "anthropic-messages" ? ANTHROPIC_DEFAULT_MODEL : DEFAULT_MODELS[role]),
       ...(opts.explicit.provider ? { provider: opts.explicit.provider } : {}),
+      ...(protocol ? { protocol } : {}),
+      ...withEffort,
     };
   }
   const trustedPolicy = opts?.trustedPolicy !== undefined ? opts.trustedPolicy : loadTrustedPolicy(env);
@@ -104,16 +126,20 @@ export function resolveProviderConfig(
         apiKey,
         model: fileRef.model,
         provider: fileRef.provider,
+        ...(policyProvider.protocol ? { protocol: policyProvider.protocol } : {}),
+        ...withEffort,
         ...(trusted && file?.pricing ? { pricing: file.pricing } : {}),
       };
     }
-    if (trustedPolicy.models?.[role]) return resolveFromTrustedPolicy(role, trustedPolicy, env);
+    if (trustedPolicy.models?.[role]) return { ...resolveFromTrustedPolicy(role, trustedPolicy, env), ...withEffort };
   }
   const useFileProviders = trusted;
   const ref = useFileProviders ? file?.models?.[role] : undefined;
   const named = ref ? file?.providers?.[ref.provider] : undefined;
   if (ref && !named) throw new Error(`.lesscode.json: models.${role}.provider "${ref.provider}" is not defined in providers`);
   const fileKey = named ? env[named.apiKeyEnv]?.trim() : undefined;
+  const protocol = opts?.explicit?.protocol ?? pickProtocol(env, roleUpper) ?? named?.protocol;
+  const anthropic = protocol === "anthropic-messages";
   // Canonical LESSCODE_* beats the file; the file's provider-specific
   // key indirection beats the deprecated global META_*/MODEL_* aliases.
   // Otherwise an unrelated legacy key for the *other* provider would
@@ -122,7 +148,7 @@ export function resolveProviderConfig(
     opts?.explicit?.baseUrl ??
     pick(env, [`LESSCODE_${roleUpper}_API_BASE_URL`, "LESSCODE_API_BASE_URL"], warn) ??
     named?.baseUrl ??
-    pick(env, ["META_API_BASE_URL"], warn) ?? DEFAULT_API_BASE_URL;
+    (anthropic ? ANTHROPIC_API_BASE_URL : pick(env, ["META_API_BASE_URL"], warn) ?? DEFAULT_API_BASE_URL);
   const apiKey =
     opts?.explicit?.apiKey ??
     pick(env, [`LESSCODE_${roleUpper}_API_KEY`, "LESSCODE_API_KEY"], warn) ??
@@ -135,13 +161,15 @@ export function resolveProviderConfig(
   }
   const model =
     opts?.explicit?.model ??
-    pick(env, [`LESSCODE_${roleUpper}_MODEL`, "LESSCODE_MODEL", "META_MODEL"], warn) ?? ref?.model ?? DEFAULT_MODELS[role];
+    pick(env, [`LESSCODE_${roleUpper}_MODEL`, "LESSCODE_MODEL", "META_MODEL"], warn) ?? ref?.model ?? (anthropic ? ANTHROPIC_DEFAULT_MODEL : DEFAULT_MODELS[role]);
   const provider = opts?.explicit?.provider ?? pick(env, ["LESSCODE_PROVIDER"], warn) ?? ref?.provider;
   return {
     baseUrl: baseUrlRaw.replace(/\/+$/, ""),
     apiKey,
     model,
     ...(provider ? { provider } : {}),
+    ...(protocol ? { protocol } : {}),
+    ...withEffort,
     ...(file?.pricing ? { pricing: file.pricing } : {}),
   };
 }
@@ -171,6 +199,8 @@ export interface CreateModelClientOptions {
   fileConfig?: LesscodeConfig | null;
   config?: ProviderConfig;
   fetchFn?: FetchLike;
+  /** Fetch for the Anthropic Messages client, which needs a full Response (tests stub it). */
+  sdkFetch?: typeof fetch;
   timeoutMs?: number;
   maxRetries?: number;
   retryBackoffMs?: number;
@@ -190,6 +220,10 @@ export function createModelClient(role: ModelRole = "spark", opts?: CreateModelC
   const maxRetries = opts?.maxRetries ?? 2;
   const retryBackoffMs = opts?.retryBackoffMs ?? 500;
   const sleep = opts?.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  // A host-supplied protocol has its own authority; otherwise the resolved config picks the wire format.
+  if (!opts?.protocol && config.protocol === "anthropic-messages") {
+    return createAnthropicClient(config, { role, fetch: opts?.sdkFetch, timeoutMs, maxRetries, retryBackoffMs, sleep, env: opts?.env });
+  }
   const protocol = opts?.protocol ?? openAiChatProtocol;
   return {
     config,

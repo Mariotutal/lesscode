@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { z } from "zod";
+import { PROTOCOL_IDS, type ProtocolId } from "./types.js";
 
 const trustedProviderSchema = z
   .object({
@@ -13,6 +14,7 @@ const trustedProviderSchema = z
       }
     }, "must be https without credentials"),
     apiKeyEnv: z.string().min(1),
+    protocol: z.enum(PROTOCOL_IDS).optional(),
     allowedModels: z.array(z.string().min(1)).optional(),
   })
   .strict();
@@ -75,7 +77,7 @@ export function resolveFromTrustedPolicy(
   role: "spark" | "wonder",
   policy: TrustedPolicy,
   env: NodeJS.ProcessEnv,
-): { baseUrl: string; apiKey: string; model: string; provider: string } {
+): { baseUrl: string; apiKey: string; model: string; provider: string; protocol?: ProtocolId } {
   const ref = policy.models?.[role];
   if (!ref) throw new Error(`trusted policy has no models.${role}`);
   const prov = policy.providers[ref.provider];
@@ -84,5 +86,5 @@ export function resolveFromTrustedPolicy(
   if (prov.allowedModels && !prov.allowedModels.includes(ref.model)) throw new Error(`model "${ref.model}" not allowed for provider "${ref.provider}"`);
   const key = env[prov.apiKeyEnv]?.trim();
   if (!key) throw new Error(`trusted provider "${ref.provider}" missing env ${prov.apiKeyEnv}`);
-  return { baseUrl: prov.baseUrl.replace(/\/+$/, ""), apiKey: key, model: ref.model, provider: ref.provider };
+  return { baseUrl: prov.baseUrl.replace(/\/+$/, ""), apiKey: key, model: ref.model, provider: ref.provider, ...(prov.protocol ? { protocol: prov.protocol } : {}) };
 }

@@ -1,10 +1,21 @@
 export type ModelRole = "spark" | "wonder";
 
+/** Operator-selected wire format. Fetched checkouts cannot choose it. */
+export const PROTOCOL_IDS = ["openai-chat-completions", "anthropic-messages"] as const;
+export type ProtocolId = (typeof PROTOCOL_IDS)[number];
+
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type EffortLevel = (typeof EFFORT_LEVELS)[number];
+
 export interface ProviderConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
   provider?: string;
+  /** Wire format; absent means OpenAI Chat Completions. */
+  protocol?: ProtocolId;
+  /** Reasoning effort, sent only by the Anthropic Messages client. */
+  effort?: EffortLevel;
   /** Optional per-model pricing from `.lesscode.json` (USD per 1M tokens). */
   pricing?: Record<string, { inputPerMtok?: number; outputPerMtok?: number }>;
 }

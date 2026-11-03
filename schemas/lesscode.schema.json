@@ -26,6 +26,12 @@
             "type": "string",
             "minLength": 1
           },
+          "protocol": {
+            "enum": [
+              "openai-chat-completions",
+              "anthropic-messages"
+            ]
+          },
           "apiKey": {
             "not": {}
           }
