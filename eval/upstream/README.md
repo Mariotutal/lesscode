@@ -111,3 +111,10 @@ The first completed live selection and its manual note-quality findings
 are recorded in [observed-runs.md](observed-runs.md). All three real
 adapters passed mechanical checks, but factual errors in the generated
 notes prevented a review-quality sign-off.
+
+The subsequent [review accuracy investigation](review-accuracy.md)
+includes paired behavior/coverage controls and a larger-input repeat.
+It records a failed prompt-guidance experiment as well as the remaining
+need for factual claim verification. The diagnostic holdouts can be run
+with `node --import tsx eval/upstream/accuracy.ts --live` using the same
+explicit operator model environment and request bounds.
