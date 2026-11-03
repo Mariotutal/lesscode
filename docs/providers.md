@@ -1,6 +1,6 @@
 # Providers and credentials
 
-Spark classifies findings; Wonder returns the edit plan and review in **one** model call. They are roles, not mandatory vendors. Configure both with tool-capable models. The built-in wire format is OpenAI Chat Completions; native vendor protocols require a host-supplied adapter.
+Spark classifies findings; Wonder returns the edit plan and review in **one** model call. They are roles, not mandatory vendors. Configure both with tool-capable models. Two wire formats are built in: OpenAI Chat Completions (the default) and the Anthropic Messages API. Other native vendor protocols require a host-supplied adapter.
 
 ## Tested Baseten configuration
 
@@ -24,6 +24,18 @@ export LESSCODE_API_KEY="${BASETEN_API_KEY:?Load BASETEN_API_KEY from your opera
 
 LessCode does **not** automatically load `.env`. Put actual keys in the control process environment or secret store, never in a committed file, model note or manifest.
 
+## Anthropic Messages configuration
+
+Load `LESSCODE_API_KEY` from your operator secret store, then select the protocol:
+
+```sh
+export LESSCODE_PROTOCOL=anthropic-messages
+```
+
+With no endpoint or model set, this uses `https://api.anthropic.com` and `claude-opus-5-5` for both roles. Set `LESSCODE_SPARK_MODEL` / `LESSCODE_WONDER_MODEL` to choose other models, and `LESSCODE_SPARK_EFFORT` / `LESSCODE_WONDER_EFFORT` (`low`, `medium`, `high`, `xhigh`, `max`) to tune reasoning effort; the defaults are `low` for Spark and `high` for Wonder. `ANTHROPIC_API_KEY` is not an automatic alias, and the client never reads `ANTHROPIC_*` variables or a local CLI profile: bind a vendor-named key explicitly, as for Baseten above, or name it with `apiKeyEnv`.
+
+The adapter sends one streamed `POST <baseUrl>/v1/messages` per model call, with `tool_choice: {"type": "auto"}` and a 64K output-token ceiling. It keeps the same transport rules as the default adapter (described under Gateway compatibility below). On the first-party endpoint it also enables the server-side refusal fallback, so `manifest.responseModels` may name the model that actually answered. A response that still ends in a refusal fails the call with a refusal error instead of returning an empty plan.
+
 ## Environment configuration
 
 | Shared variable | Per-role override | Meaning |
@@ -31,6 +43,8 @@ LessCode does **not** automatically load `.env`. Put actual keys in the control 
 | `LESSCODE_API_KEY` | `LESSCODE_SPARK_API_KEY`, `LESSCODE_WONDER_API_KEY` | Credential for the selected endpoint. |
 | `LESSCODE_API_BASE_URL` | `LESSCODE_SPARK_API_BASE_URL`, `LESSCODE_WONDER_API_BASE_URL` | Base URL; `/chat/completions` is appended after trailing slashes are removed. |
 | `LESSCODE_MODEL` | `LESSCODE_SPARK_MODEL`, `LESSCODE_WONDER_MODEL` | Requested provider model ID. |
+| `LESSCODE_PROTOCOL` | `LESSCODE_SPARK_PROTOCOL`, `LESSCODE_WONDER_PROTOCOL` | `openai-chat-completions` (default) or `anthropic-messages`. |
+| `LESSCODE_EFFORT` | `LESSCODE_SPARK_EFFORT`, `LESSCODE_WONDER_EFFORT` | Reasoning effort; sent only by the Anthropic Messages adapter. |
 
 Choose one shared endpoint or separate each role's endpoint/key/model. Use HTTPS for remote providers. A local development gateway can use an operator-selected loopback HTTP URL in environment mode; trusted policy endpoints require HTTPS.
 
@@ -79,7 +93,7 @@ A fetched checkout is untrusted. It cannot choose credential-variable names or e
 }
 ```
 
-The file contains references, not secrets. When policy selects a role, its endpoint and credential binding are authoritative: a checkout may request an allowed alias/model, otherwise policy role defaults apply. Canonical endpoint/model exports do not override that selected policy role. Unknown aliases and disallowed models fail before Spark. Without policy, fetched reviews use the operator environment, not fetched provider definitions.
+The file contains references, not secrets. A provider entry (here or in a trusted local file) may add `"protocol": "anthropic-messages"` to use the Anthropic Messages adapter for every role that selects it. When policy selects a role, its endpoint and credential binding are authoritative: a checkout may request an allowed alias/model, otherwise policy role defaults apply. Canonical endpoint/model exports do not override that selected policy role. Unknown aliases and disallowed models fail before Spark. Without policy, fetched reviews use the operator environment, not fetched provider definitions.
 
 ## Resolution details
 
@@ -105,7 +119,7 @@ Transport redirects are rejected. Only 429/5xx are retried, at most twice with b
 
 For OpenRouter, LiteLLM, Portkey or another gateway, verify that the specific deployment exposes this contract, preserves tools and accepts Bearer auth. Do not assume a vendor name or base URL supplies compatibility. The built-in protocol adds no vendor-specific routing headers. Header/routing requirements beyond this contract require an operator-owned gateway configuration or protocol adapter, not an invented environment variable.
 
-`ModelProtocol` separates encoding/decoding from retry/cancellation. A trusted host can pass `createModelClient('wonder', { protocol: hostProtocol })`, normalizing output to `ChatCompletionResult`. Native Anthropic/Gemini protocols are not built in, and a fetched config cannot select a protocol. The exported interfaces are at `lesscode/provider`.
+`ModelProtocol` separates encoding/decoding from retry/cancellation. A trusted host can pass `createModelClient('wonder', { protocol: hostProtocol })`, normalizing output to `ChatCompletionResult`. The Anthropic Messages adapter is built in and is selected with `protocol` (environment, trusted policy provider, or trusted local provider); other native protocols are not. A fetched checkout picks only a policy alias, so it cannot select a protocol. The exported interfaces are at `lesscode/provider`.
 
 ## Usage and cost
 

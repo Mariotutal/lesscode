@@ -145,7 +145,7 @@ export async function runReview(opts: ReviewRequest): Promise<RunRecord> {
     const sparkClient = opts.sparkClient ?? createModelClient("spark", clientOptions);
     const wonderClient = opts.wonderClient ?? createModelClient("wonder", clientOptions);
     record.execution.configSource = opts.sparkClient && opts.wonderClient ? 'injected' : trustedPolicy ? 'trusted-policy' : trustedCwd && fileConfig ? 'trusted-local' : 'operator-environment';
-    record.execution.configHash = createHash('sha256').update(JSON.stringify([sparkClient, wonderClient].map(client => ({ provider: client.config.provider, model: client.config.model, baseUrl: client.config.baseUrl, pricing: Object.entries(client.config.pricing ?? {}).sort(([a], [b]) => a.localeCompare(b)) })))).digest('hex');
+    record.execution.configHash = createHash('sha256').update(JSON.stringify([sparkClient, wonderClient].map(client => ({ provider: client.config.provider, protocol: client.config.protocol, effort: client.config.effort, model: client.config.model, baseUrl: client.config.baseUrl, pricing: Object.entries(client.config.pricing ?? {}).sort(([a], [b]) => a.localeCompare(b)) })))).digest('hex');
     record.execution.models = {
       spark: { model: sparkClient.config.model, provider: sparkClient.config.provider },
       wonder: { model: wonderClient.config.model, provider: wonderClient.config.provider },

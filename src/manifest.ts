@@ -39,6 +39,10 @@ export interface RunCost {
 export const DEFAULT_PRICING: Record<string, ModelPricing> = {
   "muse-spark-1.3": { inputPerMtok: 0.5, outputPerMtok: 1.5 },
   "muse-wonder-1.0": { inputPerMtok: 3, outputPerMtok: 15 },
+  // Anthropic list prices; Haiku 5.5 is the rate for prompts up to 100K tokens.
+  "claude-opus-5-5": { inputPerMtok: 4, outputPerMtok: 20 },
+  "claude-sonnet-5-5": { inputPerMtok: 2, outputPerMtok: 10 },
+  "claude-haiku-5-5": { inputPerMtok: 0.1, outputPerMtok: 0.5 },
 };
 
 function validFinite(n: unknown): n is number { return typeof n === "number" && Number.isFinite(n) && n >= 0; }
@@ -108,7 +112,7 @@ export class ManifestBuilder {
   readonly pricingByRole: Record<"spark" | "wonder", Record<string, ModelPricing> | undefined> = { spark: undefined, wonder: undefined };
   // per-call attribution: each call keeps its served model so retries with different model ids don't overwrite
   readonly calls: { role: "spark" | "wonder"; model: string; usage: TokenUsage; hasUsage: boolean }[] = [];
-  readonly pricingVersion = "lesscode-pricing-v1";
+  readonly pricingVersion = "lesscode-pricing-v2";
 
   /** Record one response: aggregate + per-role usage, and the provider-returned model id. */
   recordResponse(role: "spark" | "wonder", usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }, responseModel?: string): void {

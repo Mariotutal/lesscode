@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, resolve, relative, isAbsolute } from "node:path";
 import { z } from "zod";
+import { PROTOCOL_IDS } from "./types.js";
 
 /**
  * Committable per-repo config: `.lesscode.json` (Continue shape).
@@ -20,6 +21,7 @@ const providerEntrySchema = z
   .object({
     baseUrl: z.string().min(1),
     apiKeyEnv: z.string().min(1),
+    protocol: z.enum(PROTOCOL_IDS).optional(),
     // Commit-safety: a literal key in a committed file is a leak, not config.
     apiKey: z.never().optional(),
   })
