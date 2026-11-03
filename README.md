@@ -133,6 +133,6 @@ Tests and sealed fixture paths are protected. The gate checks the prepared tree'
 - [Validation and known limits](docs/validation.md)
 - [Legacy simplify interface](docs/simplify-tool.md)
 
-Historical measurements, audit corrections and design proposals are linked from the documentation site; they are dated evidence, not a global review accuracy claim. The repository currently has no root license file or package license field, so no license badge is presented until that maintainer decision is made.
+Historical measurements, audit corrections and design proposals are linked from the documentation site; they are dated evidence, not a global review accuracy claim. LessCode is licensed under [Apache-2.0](LICENSE). Provider, model, trademark and hosted-service terms remain separate from the repository license.
 
 For contributors, start with [AGENTS.md](AGENTS.md) and [development.md](docs/development.md). For the full documentation site, visit <https://mariotutal.github.io/lesscode/>.
