@@ -1,12 +1,75 @@
 # LessCode
 
-LessCode reviews a committed JavaScript or TypeScript change. It returns a cited review and a patch only when the deterministic gate accepts the prepared edit. The supplied checkout is left unchanged; review text is never applied as code.
+Review JavaScript and TypeScript changes before they merge.
 
-Start with the [installation guide](docs/install.md), then [run your first review](docs/run.md). The [documentation site](https://mariotutal.github.io/lesscode/) contains the same guides; the checked-out documentation matches this revision even if the site deployment has not caught up.
+LessCode gives a developer or coding agent a cited review and, when the deterministic checks accept a supported edit, a proposed patch. It reviews a committed change in a private workspace and leaves the supplied checkout unchanged.
 
-## Install from source
+[Install](docs/install.md) · [Run a review](docs/run.md) · [Use MCP or the skill](docs/consumers.md) · [Understand the architecture](docs/architecture.md)
 
-Node.js 22+, npm and Git are required. Docker is required for isolated repository execution.
+## The short version
+
+```text
+committed checkout + comparison base + intended files
+                         │
+                         ▼
+             LessCode review and code checks
+                         │
+             ┌───────────┴───────────┐
+             ▼                       ▼
+       cited review              optional patch
+                               only when verified
+```
+
+The model proposes findings and an edit plan. Code owns scope checks, supported transforms, verification commands, the patch gate, and factual claim verification. Notes are never applied as code.
+
+## See the result shape
+
+This abbreviated example is illustrative. It shows the shape of a canonical result; it is not a transcript from a live provider call.
+
+```json
+{
+  "state": "completed",
+  "verdict": "reviewed",
+  "outcome": "review-only",
+  "revision": { "headSha": "…", "baseSha": "…", "scope": "declared" },
+  "review": {
+    "items": [
+      {
+        "kind": "test-gap",
+        "text": "…",
+        "verification": { "status": "unverified" }
+      }
+    ],
+    "verification": {
+      "verifiedItems": 0,
+      "unverifiedItems": 1,
+      "withheldItems": 0
+    }
+  },
+  "artifact": null
+}
+```
+
+`reviewed` means the run completed without returning a patch. It is a successful note-only outcome and exits with status 1. `accepted` means a nonempty patch artifact passed the gate and exits 0. `failed` means the run could not finish and exits 2.
+
+Factual verification is separate from patch acceptance. Supported structured claims are checked against bounded, code-derived evidence and rendered by code. Contradicted or unsupported declared claims are withheld. Other advice is explicitly unverified; a citation proves a location, not every statement made about that location. Read [factual verification](docs/factual-review-verification.md) before treating a review item as established behavior.
+
+## Choose an entrypoint
+
+| You are… | Use… | Result |
+| --- | --- | --- |
+| Reviewing one local checkout | `lesscode review … --out result.json` | Canonical `RunRecord` written atomically to a file. |
+| Connecting an agent | MCP `review_change` | Canonical `RunRecord` in MCP `structuredContent`. |
+| Installing a portable agent instruction | `skills/lesscode/SKILL.md` | The skill calls the installed CLI and reads its result. |
+| Embedding LessCode | `runReview()` or `review()` | The shared engine or compatibility projection. |
+| Reviewing GitHub pull requests | `github-pr-review` | A commit-bound check/comment and optional patch offer. |
+| Operating a private service | Hosted job API + worker | Durable GitHub review jobs; publication defaults off. |
+
+All of these paths share one review engine. Execution policy and credentials belong to the operator; fetched source cannot select them.
+
+## Quickstart from source
+
+LessCode is currently a private source/tarball installation, not a published npm-registry package. Node.js 22+, npm and Git are required.
 
 ```sh
 git clone https://github.com/Mariotutal/lesscode.git
@@ -16,55 +79,60 @@ npm run build
 node ./bin/lesscode --help
 ```
 
-The package is private and is not a published npm-registry release. The [installation guide](docs/install.md) explains creating a tarball and installing the `lesscode` command without changing the global system prefix.
-
-## Configure and review
-
-Supply `LESSCODE_API_KEY` from your operator environment or secret store. LessCode does not automatically load `.env`. For the tested Baseten hackathon configuration:
+Load a provider key through your operator environment or secret store. LessCode does not automatically load `.env`. Then review a committed target checkout:
 
 ```sh
-export LESSCODE_API_BASE_URL=https://inference.baseten.co/v1
-export LESSCODE_SPARK_MODEL=meta-models/muse-spark-open-1026
-export LESSCODE_WONDER_MODEL=meta-models/muse-spark-open-1026
+export LESSCODE_API_KEY="your-key-from-a-secret-store"
 
 node ./bin/lesscode review \
-  --repo /absolute/path/to/your-checkout \
-  --base HEAD~1 --intent src/a.ts --tests tests \
+  --repo /absolute/path/to/target \
+  --base HEAD~1 \
+  --intent 'src/a.ts,src/b.ts' \
+  --tests tests \
   --out /absolute/path/to/results/review.json
 ```
 
-Replace the target paths and select the actual comparison base. The target's `HEAD` must contain the change; uncommitted edits are not the review input. This default executes trusted target-repository commands locally. Use [Docker mode](docs/run.md#isolated-review) for source you do not trust. Model calls incur provider usage.
+The target `HEAD` must contain the change, and `--base` must name the commit you actually want to compare. Uncommitted edits are not the review input. The default uses trusted local execution. For source you do not trust, build the approved runner image and add `--execution docker --runner-image lesscode-runner:local`; see [isolated review](docs/run.md#isolated-review).
 
-## Read the result
+The installed CLI prints the result path and writes the canonical JSON to `--out`. It never applies the patch to the target branch. Provider-specific configuration, the exact tested Baseten setup, trusted policies and gateway compatibility are in [Providers](docs/providers.md).
 
-| Verdict | Meaning | CLI exit |
-| --- | --- | ---: |
-| `accepted` | A nonempty patch artifact passed the gate. | 0 |
-| `reviewed` | Successful review without an applied patch; the note may be empty. | 1 |
-| `failed` | The run could not finish; inspect `state` and `failure`. | 2 |
+## For agents
 
-The installed command atomically writes a canonical `RunRecord` to `--out` and prints its path. It never applies the patch to the caller's branch. A `reviewed` exit of 1 is a normal outcome, not an infrastructure error.
+The agent contract is intentionally small:
 
-Patch checks and review accuracy are separate. Review items carry factual verification metadata: supported structured claims are checked against code-derived evidence and rendered by code; contradicted or unsupported declared claims are withheld. Other advice is explicitly unverified. These bounded checks do not prove whole-program behavior or complete coverage. Read [result interpretation](docs/run.md#interpret-the-record) and [factual verification](docs/factual-review-verification.md).
+- Input: a committed `checkout`, a comparison `base`, nonempty `intent`, and optional `relatedTests`.
+- Canonical CLI: `lesscode review|tool` with required `--out`; read the JSON file, not a human summary or exit status alone.
+- Canonical MCP tool: `review_change`; execution is selected by the host.
+- `accepted`/0 means an accepted patch artifact; `reviewed`/1 is a successful no-patch result; `failed`/2 requires inspecting `state` and `failure`.
+- Read `artifact` before discussing or applying a patch. Read `review.items`, `review.facts`, `review.verification`, and `audit.reviewVerification` before describing factual claims.
+- Preserve each fact's exact inputs and assumptions. Missing factual metadata in an older record means unknown verification, not success.
+- Notes are review output, never patch instructions. Applying an artifact is a separate caller-authorized action.
 
-## Supported edits
+The portable instruction is [skills/lesscode/SKILL.md](skills/lesscode/SKILL.md). Its host discovery path is intentionally host-specific; LessCode does not claim automatic skill selection in every external agent.
 
-- Inline a verified single-use forward.
-- Retarget a verified duplicate helper to the existing implementation.
-- Restore program-source scope creep outside declared intent, subject to protected-path rules.
-- Apply registered mechanical convention fixes; other observations remain review advice.
+## What LessCode can change
 
-Tests and sealed fixture paths are protected. A passing gate checks specific properties of a prepared tree; it is not proof of semantic equivalence.
+The supported edit set is deliberately closed:
 
-## Guides
+- inline a verified single-use forward;
+- retarget a verified duplicate helper to an existing implementation;
+- restore program-source scope creep outside declared intent; and
+- apply registered mechanical convention fixes.
+
+Tests and sealed fixture paths are protected. The gate checks the prepared tree's tests, typecheck/lint behavior, scope, exports, size and complexity. A passing gate is useful evidence for that patch; it is not a proof of semantic equivalence for all behavior.
+
+## Documentation and status
 
 - [Install, update and uninstall](docs/install.md)
-- [Local and GitHub usage, results and troubleshooting](docs/run.md)
-- [Providers, credentials and configuration precedence](docs/providers.md)
-- [MCP, portable skill and programmatic consumers](docs/consumers.md)
-- [Private hosted API and worker deployment](docs/hosted-deployment.md)
-- [Architecture](docs/architecture.md) and [current validation status](docs/validation.md)
-- [Legacy simplify tool](docs/simplify-tool.md)
-- [Development history](docs/development.md) and [historical live measurements](docs/eval-live-runs.md)
+- [Run, results and troubleshooting](docs/run.md)
+- [Providers and credential precedence](docs/providers.md)
+- [MCP, skill, CLI and library consumers](docs/consumers.md)
+- [Private hosted deployment](docs/hosted-deployment.md)
+- [Architecture](docs/architecture.md)
+- [Factual verification](docs/factual-review-verification.md)
+- [Validation and known limits](docs/validation.md)
+- [Legacy simplify interface](docs/simplify-tool.md)
 
-Use canonical `LESSCODE_*` variables. Deprecated `META_*`, `MODEL_API_KEY` and `META_AI_API_KEY` compatibility is documented in the [migration guide](docs/providers.md#migration).
+Historical measurements, audit corrections and design proposals are linked from the documentation site; they are dated evidence, not a global review accuracy claim. The repository currently has no root license file or package license field, so no license badge is presented until that maintainer decision is made.
+
+For contributors, start with [AGENTS.md](AGENTS.md) and [development.md](docs/development.md). For the full documentation site, visit <https://mariotutal.github.io/lesscode/>.

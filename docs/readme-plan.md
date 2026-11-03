@@ -1,7 +1,7 @@
 # README redesign plan
 
-Status: **proposal only**. Researched 2026-11-03 against the documentation
-refresh merged in PR #45. This plan does not change README.md, runtime
+Status: **implemented in README.md on this branch**. Researched 2026-11-03 against the documentation
+refresh merged in PR #45. The implementation changes README.md and does not change runtime
 behavior, installation/distribution, dependencies, licensing or deployment.
 See [the cited research](readme-research.md) for the five first-party
 comparisons. Their observed layouts inform editorial choices; no conversion
@@ -163,9 +163,11 @@ inventing a community channel or a missing CONTRIBUTING.md target.
 
 ## Deliverables and scope
 
-Next implementation: README rewrite, one example artifact or illustration
-with provenance, and only the supporting links/assets needed by that page.
-Keep the recent detailed-guide refresh intact. Validate links, Markdown,
-example commands and package/MCP compatibility; review the diff in a PR.
+Implemented here: README rewrite, one explicitly illustrative result
+example, and links to the detailed guides. The recent detailed-guide
+refresh remains intact. Links, Markdown, the README shell examples and the
+documentation build have been validated. The next review step is a human
+newcomer/agent rehearsal of the page; it is not a runtime or model-quality
+test.
 No dependency/SDK migration, npm publication, license choice, infrastructure
 change or live accuracy campaign is required by this README redesign.
