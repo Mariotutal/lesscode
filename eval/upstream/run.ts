@@ -8,30 +8,40 @@ import { randomUUID } from 'node:crypto';
 import { createDockerExecutor, repositoryEnvironment } from '../../src/execution/index.js';
 import { redactSecrets } from '../../src/provider/configFile.js';
 import { adapters, assessRecord, corpusSchema, sha256, type InvocationReceipt } from './contracts.js';
+import { parseArgs } from '../../src/cli/args.js';
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const flags = process.argv.slice(2);
-if (flags.some((flag) => !['--live', '--baseline'].includes(flag)) || flags.length > 1) throw new Error('Usage: npx tsx eval/upstream/run.ts [--baseline|--live]');
-const live = flags.includes('--live');
+const usage = 'npm run eval:upstream -- [--baseline|--live] [--case <id>]';
+const options = parseArgs(process.argv.slice(2), [{ name: 'live', kind: 'flag' }, { name: 'baseline', kind: 'flag' }, { name: 'case', kind: 'value' }], usage);
+if (options.help) { console.log(usage); process.exit(0); }
+if (options.flags.has('live') && options.flags.has('baseline')) throw new Error('Select only one evaluation mode');
+const live = options.flags.has('live');
 const image = process.env.LESSCODE_RUNNER_IMAGE;
 if (!image) throw new Error('LESSCODE_RUNNER_IMAGE must name an approved preinstalled Docker image');
 if (live && (!process.env.LESSCODE_API_KEY || !process.env.LESSCODE_API_BASE_URL || !process.env.LESSCODE_SPARK_MODEL || !process.env.LESSCODE_WONDER_MODEL)) {
   throw new Error('Live runs require explicit LESSCODE_API_KEY, LESSCODE_API_BASE_URL, LESSCODE_SPARK_MODEL and LESSCODE_WONDER_MODEL in the operator environment. No .env is loaded.');
 }
 const text = readFileSync(new URL('./manifest.json', import.meta.url), 'utf8');
-const cases = corpusSchema.parse(JSON.parse(text));
+const allCases = corpusSchema.parse(JSON.parse(text));
+const selectedId = options.values.get('case');
+const cases = allCases.filter((c) => !selectedId || c.id === selectedId);
+if (!cases.length) throw new Error('Unknown selected case');
+const selection = { selectedCases: cases.map((c) => c.id), excludedCases: allCases.filter((c) => !cases.includes(c)).map((c) => c.id) };
 // Keep the initial live experiment bounded. Expansion requires a reviewed change.
 if (cases.length > 3) throw new Error('Initial upstream pilot is limited to three cases');
 const work = mkdtempSync(join(tmpdir(), 'lesscode-upstream-'));
 const env = { ...repositoryEnvironment(work), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0' };
-const command = async (cwd: string, cmd: string, args: string[]) => {
+const command = async (cwd: string, cmd: string, args: string[], raw = false) => {
   const commandEnv: NodeJS.ProcessEnv = { ...env };
   if (cmd === 'docker') for (const key of ['HOME', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG']) if (process.env[key]) commandEnv[key] = process.env[key];
-  try { return (await exec(cmd, args, { cwd, env: commandEnv, timeout: 120_000, maxBuffer: 8 * 1024 * 1024 })).stdout.trim(); }
+  try {
+    const { stdout } = await exec(cmd, args, { cwd, env: commandEnv, timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
+    return raw ? stdout : stdout.trim();
+  }
   catch { throw new Error(`operator command failed: ${cmd} ${args[0] ?? ''}`); }
 };
-const git = (cwd: string, args: string[]) => command(cwd, 'git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args]);
+const git = (cwd: string, args: string[], raw = false) => command(cwd, 'git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args], raw);
 const save = (path: string, data: unknown) => {
   const value = JSON.stringify(data, null, 2) + '\n';
   if (redactSecrets(value) !== value) throw new Error('artifact withheld: contains an operator secret');
@@ -53,7 +63,8 @@ try {
   save(join(output, 'provenance.json'), { schemaVersion: 1, mode: live ? 'live' : 'baseline-only', productCommit, evaluatorCommit: productCommit,
     distSha256: distHash(join(root, 'dist')), manifestSha256: sha256(text), imageId, node: process.version,
     adapters: live ? adapters : [], budgets: { maxCases: 3, requestsPerAdapter: 4, promptBytesPerRequest: 32768, completionTokensPerRequest: 8192 },
-    limitations: ['One curated upstream change, not a 30-project corpus', 'Dependency inventory is captured; upstream has no committed lockfile', 'Skill command is exercised by CLI; agent skill selection is not evaluated', 'Live outcome checks require independent human review of notes and patches'] });
+    ...selection,
+    limitations: ['Small selected upstream pilot, not a 30-project corpus', 'Dependency inventories are captured; these upstream revisions have no committed lockfiles', 'Skill command is exercised by CLI; agent skill selection is not evaluated', 'Live outcome checks require independent human review of notes and patches'] });
   save(join(output, 'manifest.json'), cases);
   for (const c of cases) {
     const directory = join(output, c.id); mkdirSync(directory, { mode: 0o700 });
@@ -64,7 +75,7 @@ try {
       await git(source, ['remote', 'add', 'origin', c.repository]);
       await git(source, ['fetch', '--quiet', '--depth=2', 'origin', c.base, c.head]);
       if (await git(source, ['rev-parse', `${c.head}^`]) !== c.base) throw new Error('Pilot requires the actual first-parent upstream change');
-      const patch = await git(source, ['diff', '--binary', c.base, c.head]);
+      const patch = await git(source, ['diff', '--binary', c.base, c.head], true);
       save(join(directory, 'source.json'), { repository: c.repository, base: c.base, head: c.head, patch, patchSha256: sha256(patch) });
       for (const [label, revision] of [['base', c.base], ['head', c.head]]) {
         const tree = await git(source, ['ls-tree', '-r', revision!]);
@@ -120,7 +131,7 @@ try {
     save(join(directory, 'summary.json'), summary);
     console.log(`${c.id}: ${summary.status}`);
   }
-  save(join(output, 'summary.json'), { mode: live ? 'live' : 'baseline-only', allPassed, completedAt: new Date().toISOString(),
+  save(join(output, 'summary.json'), { mode: live ? 'live' : 'baseline-only', ...selection, allPassed, completedAt: new Date().toISOString(),
     modelQualityEstablished: false, note: live ? 'Canonical records validated mechanically; human review still required.' : 'No model or adapter invocation performed.' });
   process.exitCode = allPassed ? 0 : 1;
 } finally { rmSync(work, { recursive: true, force: true }); console.log(`Evidence: ${output}`); }

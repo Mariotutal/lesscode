@@ -9,13 +9,68 @@
       "path": "license",
       "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
     },
-    "intent": ["index.js", "benchmark.js"],
-    "relatedTests": ["test.js", "index.test-d.ts"],
+    "intent": [
+      "index.js",
+      "benchmark.js"
+    ],
+    "relatedTests": [
+      "test.js",
+      "index.test-d.ts"
+    ],
     "expectedVerdict": "reviewed",
     "rationale": "The upstream performance change retains the public predicate and adds a benchmark. The short prototype checks preserve cross-realm object recognition; the shared runLoop is used by both warmup and measurement. No known safe mechanical simplification warrants an applied patch. This expectation was recorded from source inspection before any model run; a mismatch requires human review, not relabeling the answer.",
     "checks": [
-      { "command": "node", "args": ["--check", "index.js"] },
-      { "command": "npm", "args": ["test"] }
+      {
+        "command": "node",
+        "args": [
+          "--check",
+          "index.js"
+        ]
+      },
+      {
+        "command": "npm",
+        "args": [
+          "test"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "is-number-refactor",
+    "repository": "https://github.com/jonschlinkert/is-number.git",
+    "base": "a69ea0bf7292faa5175c97b43de823f698f63ef0",
+    "head": "b0ceb52a380b20221e5be749160aeb13bf3904d0",
+    "license": {
+      "spdx": "MIT",
+      "path": "LICENSE",
+      "sha256": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2"
+    },
+    "intent": [
+      "index.js",
+      "benchmark/index.js",
+      "package.json",
+      "test.js",
+      ".verb.md"
+    ],
+    "relatedTests": [
+      "test.js"
+    ],
+    "expectedVerdict": "reviewed",
+    "rationale": "The upstream refactor shortens the public finite-number predicate and retains explicit empty-string and type guards. The benchmark comparison functions are deliberate separate versions, not interchangeable helpers. No independently established safe mechanical patch is expected. Benchmark functions already reference an undeclared num in the parent: that is a pre-existing limitation, not a newly introduced regression. This verdict hypothesis is recorded before model use.",
+    "checks": [
+      {
+        "command": "node",
+        "args": [
+          "--check",
+          "index.js"
+        ]
+      },
+      {
+        "command": "npm",
+        "args": [
+          "test"
+        ]
+      }
     ]
   }
 ]
